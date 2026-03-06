@@ -72,7 +72,7 @@ export default function MessageBubble({ message }: Props) {
             isInbound
               ? 'bg-gray-700 text-white rounded-tl-sm'
               : message.sender === 'bot'
-              ? 'bg-blue-700 text-white rounded-tr-sm'
+              ? 'bg-gray-400/20 text-gray-100 rounded-tr-sm border border-gray-500/30'
               : 'bg-green-700 text-white rounded-tr-sm'
           }`}
         >

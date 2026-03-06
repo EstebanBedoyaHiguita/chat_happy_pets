@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { IConversation, IMessage } from '@/types'
@@ -15,6 +15,14 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [sending, setSending] = useState(false)
   const [takingOver, setTakingOver] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const isAtBottomRef = useRef(true)
+
+  function checkIfAtBottom() {
+    const el = scrollContainerRef.current
+    if (!el) return
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }
 
   const fetchMessages = useCallback(async () => {
     const res = await fetch(`/api/conversations/${conversation._id}/messages`)
@@ -31,9 +39,18 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     return () => clearInterval(interval)
   }, [fetchMessages])
 
-  // Scroll to bottom on new messages
+  // Always scroll to bottom when switching conversation
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    isAtBottomRef.current = true
+    bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation._id])
+
+  // Only scroll on new messages if user was already at the bottom
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages])
 
   async function handleTakeover() {
@@ -125,7 +142,8 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+      <div ref={scrollContainerRef} onScroll={checkIfAtBottom} className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+
         {messages.length === 0 && (
           <div className="text-center text-gray-600 text-sm pt-16">
             No hay mensajes aún
