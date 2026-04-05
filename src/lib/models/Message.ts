@@ -2,7 +2,7 @@ import mongoose, { Schema, Document, Types } from 'mongoose'
 import type { MessageDirection, MessageSender } from '@/types'
 
 export interface MessageDoc extends Document {
-  conversationId: Types.ObjectId
+  roomId: Types.ObjectId
   direction: MessageDirection
   sender: MessageSender
   content: string
@@ -12,9 +12,9 @@ export interface MessageDoc extends Document {
 
 const MessageSchema = new Schema<MessageDoc>(
   {
-    conversationId: {
+    roomId: {
       type: Schema.Types.ObjectId,
-      ref: 'Conversation',
+      ref: 'Room',
       required: true,
       index: true,
     },

@@ -1,10 +1,12 @@
 import mongoose, { Schema, Document } from 'mongoose'
 import type { ConversationStatus } from '@/types'
 
-export interface ConversationDoc extends Document {
+export interface RoomDoc extends Document {
   waId: string
   name: string
   phone: string
+  petName: string
+  address: string
   status: ConversationStatus
   assignedTo?: string
   lastMessage: string
@@ -13,11 +15,13 @@ export interface ConversationDoc extends Document {
   contextSummary: string
 }
 
-const ConversationSchema = new Schema<ConversationDoc>(
+const RoomSchema = new Schema<RoomDoc>(
   {
     waId: { type: String, required: true, unique: true },
     name: { type: String, default: 'Desconocido' },
     phone: { type: String, required: true },
+    petName: { type: String, default: '' },
+    address: { type: String, default: '' },
     status: {
       type: String,
       enum: ['bot', 'human', 'closed'],
@@ -32,6 +36,6 @@ const ConversationSchema = new Schema<ConversationDoc>(
   { timestamps: true }
 )
 
-export const Conversation =
-  mongoose.models.Conversation ||
-  mongoose.model<ConversationDoc>('Conversation', ConversationSchema)
+export const Room =
+  mongoose.models.Room ||
+  mongoose.model<RoomDoc>('Room', RoomSchema)

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
-import { Conversation } from '@/lib/models/Conversation'
+import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { sendWhatsAppMessage } from '@/lib/whatsapp'
 import { cookies } from 'next/headers'
@@ -19,13 +19,13 @@ export async function POST(
     return NextResponse.json({ error: 'Message text is required' }, { status: 400 })
   }
 
-  const conversation = await Conversation.findById(id)
-  if (!conversation) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const room = await Room.findById(id)
+  if (!room) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const waMessageId = await sendWhatsAppMessage(conversation.waId, text)
+  const waMessageId = await sendWhatsAppMessage(room.waId, text)
 
   const message = await Message.create({
-    conversationId: conversation._id,
+    roomId: room._id,
     direction: 'outbound',
     sender: 'human',
     content: text,
@@ -33,10 +33,10 @@ export async function POST(
     timestamp: new Date(),
   })
 
-  conversation.lastMessage = text
-  conversation.lastMessageAt = new Date()
-  conversation.assignedTo = agentName
-  await conversation.save()
+  room.lastMessage = text
+  room.lastMessageAt = new Date()
+  room.assignedTo = agentName
+  await room.save()
 
   return NextResponse.json(message)
 }

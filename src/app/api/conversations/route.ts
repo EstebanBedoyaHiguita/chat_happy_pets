@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
-import { Conversation } from '@/lib/models/Conversation'
+import { Room } from '@/lib/models/Room'
 
 export async function GET(req: NextRequest) {
   await connectDB()
@@ -17,10 +17,6 @@ export async function GET(req: NextRequest) {
     ]
   }
 
-  const conversations = await Conversation.find(query)
-    .sort({ lastMessageAt: -1 })
-    .limit(100)
-    .lean()
-
-  return NextResponse.json(conversations)
+  const rooms = await Room.find(query).sort({ lastMessageAt: -1 }).limit(100).lean()
+  return NextResponse.json(rooms)
 }

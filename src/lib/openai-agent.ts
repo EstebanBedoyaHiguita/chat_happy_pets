@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+﻿import OpenAI from 'openai'
 import {
   getProducts,
   getFeaturedProducts,
@@ -10,14 +10,20 @@ import {
 import { checkIntentRules } from './transfer-rules'
 import type { IMessage, ITransferRule } from '@/types'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+let _openai: OpenAI | null = null
+function getOpenAI() {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  }
+  return _openai
+}
 
 const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
       name: 'get_products',
-      description: 'Obtiene el catálogo de productos de Happy Pets. Puede filtrarse por categoría.',
+      description: 'Obtiene el catálogo de productos de Happy Pets. Cada producto incluye: _id, name, description, price (en pesos colombianos COP), sku, stock, available, images (array de URLs). Puede filtrarse por categoría.',
       parameters: {
         type: 'object',
         properties: {
@@ -33,7 +39,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'get_featured_products',
-      description: 'Obtiene los productos destacados de la tienda.',
+      description: 'Obtiene los productos destacados. Cada producto incluye price (en COP), name, images y descripción completa.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -49,7 +55,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'get_product_detail',
-      description: 'Obtiene los detalles completos de un producto específico.',
+      description: 'Obtiene los detalles completos de un producto por su _id. Retorna: name, description, price (en pesos colombianos COP), stock, images y más. Usa el _id del producto obtenido con get_products.',
       parameters: {
         type: 'object',
         properties: {
@@ -93,9 +99,25 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'update_customer_info',
+      description: 'Actualiza la informacion del cliente (nombre, mascota, direccion) en cuanto el cliente la proporcione en la conversacion.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Nombre real del cliente' },
+          petName: { type: 'string', description: 'Nombre de la mascota' },
+          address: { type: 'string', description: 'Direccion de entrega' },
+        },
+      },
+    },
+  },
 ]
 
-async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+async function executeTool(name: string, args: Record<string, unknown>, waId?: string): Promise<string> {
+  console.log('[Tool call]', name, JSON.stringify(args))
   try {
     let result
     switch (name) {
@@ -117,13 +139,54 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       case 'register_customer':
         result = await registerCustomer(args as Parameters<typeof registerCustomer>[0])
         break
+      case 'update_customer_info': {
+        if (waId) {
+          const { Room } = await import('./models/Room')
+          const update: Record<string, string> = {}
+          if (args.name) update.name = args.name as string
+          if (args.petName) update.petName = args.petName as string
+          if (args.address) update.address = args.address as string
+          if (Object.keys(update).length > 0) {
+            await Room.updateOne({ waId }, { $set: update })
+          }
+        }
+        result = { success: true }
+        break
+      }
       default:
         return 'Tool not found'
     }
-    return JSON.stringify(result)
+    const json = JSON.stringify(result)
+    console.log('[Tool success]', name, json.substring(0, 300))
+    return json
   } catch (error) {
-    return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+    console.error('[Tool ERROR]', name, error instanceof Error ? error.message : error)
+    return JSON.stringify({ status: 'sin_datos', instruccion: 'Usa la informacion del sistema para responder. No menciones errores tecnicos.' })
   }
+}
+
+
+export async function summarizeHistory(messages: IMessage[]): Promise<string> {
+  if (messages.length === 0) return ''
+  const transcript = messages
+    .map((m) => {
+      const role = m.direction === 'inbound' ? 'Cliente' : m.sender === 'bot' ? 'Bot' : 'Asesor'
+      return role + ': ' + m.content.substring(0, 300)
+    })
+    .join('\n')
+  const res = await getOpenAI().chat.completions.create({
+    model: 'gpt-4o-mini',
+    temperature: 0,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Eres un asistente que resume conversaciones de WhatsApp de forma concisa. Resume los puntos clave: qué productos preguntó el cliente, qué información se le dio, qué decidió o pidió. Máximo 200 palabras en español.',
+      },
+      { role: 'user', content: 'Resume esta conversacion:\n' + transcript },
+    ],
+  })
+  return res.choices[0].message.content ?? ''
 }
 
 export interface AgentResponse {
@@ -137,14 +200,25 @@ export async function runAgent(
   conversationHistory: IMessage[],
   systemPrompt: string,
   transferRules: ITransferRule[],
-  model = 'gpt-4o',
-  temperature = 0.7
+  model = 'gpt-4o-mini',
+  temperature = 0.7,
+  contextSummary = '',
+  waId = ''
 ): Promise<AgentResponse> {
+  const summarySection = contextSummary
+    ? `
+CONTEXTO PREVIO DE ESTA CONVERSACIÓN (resumen):
+${contextSummary}
+`
+    : ''
+
   const transferInstructions = `
 
 FORMATO DE RESPUESTA:
 - Nunca uses sintaxis markdown para imágenes (no uses ![texto](url)). Si quieres compartir la imagen de un producto, escribe la URL directamente en el texto así: "Imagen: https://..."
 - Puedes usar texto plano, saltos de línea y emojis. No uses otro tipo de markdown.
+- NUNCA digas que hay problemas técnicos o que no puedes obtener precios. Si el cliente pregunta por precios o valores, llama SIEMPRE get_products o get_featured_products y usa el campo "price" del resultado (está en pesos colombianos COP, formatea como $5.200 COP).
+- Si una herramienta retorna {"status":"sin_datos"}, usa SIEMPRE la informacion estatica del sistema. NUNCA menciones errores ni problemas tecnicos. Continua la conversacion con normalidad.
 
 IMPORTANTE: Al final de cada respuesta, si detectas alguna de estas situaciones, debes devolver un JSON en la última línea con el formato: {"transfer":true,"reason":"motivo"}
 Situaciones que requieren transferencia a humano:
@@ -154,15 +228,15 @@ Situaciones que requieren transferencia a humano:
 Si NO hay que transferir, no incluyas ese JSON.`
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: 'system', content: systemPrompt + transferInstructions },
-    ...conversationHistory.slice(-20).map((m) => ({
+    { role: 'system', content: systemPrompt + summarySection + transferInstructions },
+    ...conversationHistory.slice(-6).map((m) => ({
       role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.content,
     })),
     { role: 'user', content: userMessage },
   ]
 
-  let response = await openai.chat.completions.create({
+  let response = await getOpenAI().chat.completions.create({
     model,
     temperature,
     messages,
@@ -179,7 +253,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
     const toolCalls = ((assistantMessage.tool_calls ?? []) as FnCall[]).filter((tc) => tc.type === 'function')
     for (const toolCall of toolCalls) {
       const args = JSON.parse(toolCall.function.arguments || '{}')
-      const result = await executeTool(toolCall.function.name, args)
+      const result = await executeTool(toolCall.function.name, args, waId)
       messages.push({
         role: 'tool',
         tool_call_id: toolCall.id,
@@ -187,7 +261,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
       })
     }
 
-    response = await openai.chat.completions.create({
+    response = await getOpenAI().chat.completions.create({
       model,
       temperature,
       messages,

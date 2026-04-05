@@ -3,23 +3,29 @@ export type MessageDirection = 'inbound' | 'outbound'
 export type MessageSender = 'user' | 'bot' | 'human'
 export type TransferRuleType = 'keyword' | 'intent'
 
-export interface IConversation {
+export interface IRoom {
   _id: string
   waId: string
   name: string
   phone: string
+  petName: string
+  address: string
   status: ConversationStatus
   assignedTo?: string
   lastMessage: string
   lastMessageAt: string
   unreadCount: number
+  contextSummary: string
   createdAt: string
   updatedAt: string
 }
 
+/** @deprecated Use IRoom instead */
+export type IConversation = IRoom
+
 export interface IMessage {
   _id: string
-  conversationId: string
+  roomId: string
   direction: MessageDirection
   sender: MessageSender
   content: string

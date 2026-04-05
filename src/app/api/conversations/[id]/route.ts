@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
-import { Conversation } from '@/lib/models/Conversation'
+import { Room } from '@/lib/models/Room'
 
 export async function GET(
   _req: NextRequest,
@@ -8,7 +8,7 @@ export async function GET(
 ) {
   await connectDB()
   const { id } = await params
-  const conversation = await Conversation.findById(id).lean()
-  if (!conversation) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(conversation)
+  const room = await Room.findById(id).lean()
+  if (!room) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return NextResponse.json(room)
 }

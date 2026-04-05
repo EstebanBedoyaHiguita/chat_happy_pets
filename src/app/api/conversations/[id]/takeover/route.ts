@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
-import { Conversation } from '@/lib/models/Conversation'
+import { Room } from '@/lib/models/Room'
 import { cookies } from 'next/headers'
 
 export async function POST(
@@ -12,13 +12,13 @@ export async function POST(
   const cookieStore = await cookies()
   const agentName = cookieStore.get('agent_name')?.value ?? 'Asesor'
 
-  const conversation = await Conversation.findById(id)
-  if (!conversation) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const room = await Room.findById(id)
+  if (!room) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  conversation.status = 'human'
-  conversation.assignedTo = agentName
-  conversation.unreadCount = 0
-  await conversation.save()
+  room.status = 'human'
+  room.assignedTo = agentName
+  room.unreadCount = 0
+  await room.save()
 
   return NextResponse.json({ success: true, status: 'human', assignedTo: agentName })
 }
@@ -29,12 +29,12 @@ export async function DELETE(
 ) {
   await connectDB()
   const { id } = await params
-  const conversation = await Conversation.findById(id)
-  if (!conversation) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const room = await Room.findById(id)
+  if (!room) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  conversation.status = 'bot'
-  conversation.assignedTo = undefined
-  await conversation.save()
+  room.status = 'bot'
+  room.assignedTo = undefined
+  await room.save()
 
   return NextResponse.json({ success: true, status: 'bot' })
 }

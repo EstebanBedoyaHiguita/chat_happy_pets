@@ -8,8 +8,6 @@ export async function GET(
 ) {
   await connectDB()
   const { id } = await params
-  const messages = await Message.find({ conversationId: id })
-    .sort({ timestamp: 1 })
-    .lean()
+  const messages = await Message.find({ roomId: id }).sort({ timestamp: 1 }).lean()
   return NextResponse.json(messages)
 }

@@ -31,7 +31,7 @@ Tu objetivo es ayudar a los clientes con información sobre productos, precios, 
 Responde siempre en español, de manera amable y profesional.
 Si el cliente quiere hacer un pedido o necesita ayuda más personalizada, indícalo.`,
     },
-    aiModel: { type: String, default: 'gpt-4o' },
+    aiModel: { type: String, default: 'gpt-4o-mini' },
     temperature: { type: Number, default: 0.7 },
     transferRules: { type: [TransferRuleSchema], default: [] },
   },
