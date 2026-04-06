@@ -115,7 +115,7 @@ export default function CloseReasonsPage() {
             <div className="text-center text-gray-600 py-16">
               <div className="text-4xl mb-3">🔴</div>
               <p>No hay motivos de cierre configurados</p>
-              <p className="text-sm mt-1">Crea al menos uno para poder cerrar conversaciones</p>
+              <p className="text-sm mt-1">Crea al menos uno para poder cerrar conversaciones manualmente</p>
             </div>
           ) : (
             <div className="space-y-3">

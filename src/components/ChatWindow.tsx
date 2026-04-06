@@ -15,8 +15,6 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [sending, setSending] = useState(false)
   const [takingOver, setTakingOver] = useState(false)
   const [reopening, setReopening] = useState(false)
-  const [showReopenModal, setShowReopenModal] = useState(false)
-  const [templateName, setTemplateName] = useState('')
   const [showCloseModal, setShowCloseModal] = useState(false)
   const [closeReasons, setCloseReasons] = useState<ICloseReason[]>([])
   const [selectedReasonId, setSelectedReasonId] = useState('')
@@ -131,19 +129,25 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     }
   }
 
-  async function handleReopen(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    if (!templateName.trim() || reopening) return
+  async function handleReopen() {
+    if (reopening) return
     setReopening(true)
     const res = await fetch(`/api/conversations/${conversation._id}/reopen`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateName: templateName.trim(), languageCode: 'es' }),
+      body: JSON.stringify({
+        templateName: 'retoma',
+        languageCode: 'es',
+        components: [
+          {
+            type: 'body',
+            parameters: [{ type: 'text', text: 'Paula' }],
+          },
+        ],
+      }),
     })
     setReopening(false)
     if (res.ok) {
-      setShowReopenModal(false)
-      setTemplateName('')
       onStatusChange()
     }
   }
@@ -228,10 +232,11 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
           {/* Reopen with template button */}
           {isClosed && (
             <button
-              onClick={() => setShowReopenModal(true)}
-              className="bg-purple-700 hover:bg-purple-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+              onClick={handleReopen}
+              disabled={reopening}
+              className="bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
             >
-              📨 Retomar conversación
+              {reopening ? 'Enviando...' : '📨 Retomar conversación'}
             </button>
           )}
         </div>
@@ -336,43 +341,6 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
         </div>
       )}
 
-      {/* Reopen modal */}
-      {showReopenModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
-            <h2 className="text-white font-semibold text-base mb-1">Retomar conversación</h2>
-            <p className="text-gray-400 text-xs mb-4">
-              Ingresa el nombre exacto de la plantilla aprobada en Meta para enviarla a {conversation.name}.
-            </p>
-            <form onSubmit={handleReopen} className="flex flex-col gap-3">
-              <input
-                type="text"
-                value={templateName}
-                onChange={(e) => setTemplateName(e.target.value)}
-                placeholder="ej: retomar_conversacion"
-                className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                autoFocus
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowReopenModal(false)}
-                  className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={!templateName.trim() || reopening}
-                  className="bg-purple-700 hover:bg-purple-600 disabled:bg-gray-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
-                >
-                  {reopening ? 'Enviando...' : 'Enviar plantilla'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
