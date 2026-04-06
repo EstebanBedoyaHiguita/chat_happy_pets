@@ -15,6 +15,9 @@ export interface IRoom {
   lastMessage: string
   lastMessageAt: string
   windowExpiresAt: string | null
+  closeReasonId?: string
+  closeReasonName?: string
+  closedBy?: string
   unreadCount: number
   contextSummary: string
   createdAt: string
@@ -49,6 +52,13 @@ export interface IAgentConfig {
   model: string
   temperature: number
   transferRules: ITransferRule[]
+}
+
+export interface ICloseReason {
+  _id: string
+  name: string
+  active: boolean
+  createdAt: string
 }
 
 export interface HappyPetsProduct {

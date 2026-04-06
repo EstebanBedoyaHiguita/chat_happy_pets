@@ -12,6 +12,9 @@ export interface RoomDoc extends Document {
   lastMessage: string
   lastMessageAt: Date
   windowExpiresAt: Date | null
+  closeReasonId?: string
+  closeReasonName?: string
+  closedBy?: string
   unreadCount: number
   contextSummary: string
 }
@@ -32,6 +35,9 @@ const RoomSchema = new Schema<RoomDoc>(
     lastMessage: { type: String, default: '' },
     lastMessageAt: { type: Date, default: Date.now },
     windowExpiresAt: { type: Date, default: null },
+    closeReasonId: { type: String },
+    closeReasonName: { type: String },
+    closedBy: { type: String },
     unreadCount: { type: Number, default: 0 },
     contextSummary: { type: String, default: '' },
   },

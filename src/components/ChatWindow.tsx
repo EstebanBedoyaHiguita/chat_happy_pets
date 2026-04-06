@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { IConversation, IMessage } from '@/types'
+import type { IConversation, IMessage, ICloseReason } from '@/types'
 import MessageBubble from './MessageBubble'
 
 interface Props {
@@ -17,6 +17,10 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [reopening, setReopening] = useState(false)
   const [showReopenModal, setShowReopenModal] = useState(false)
   const [templateName, setTemplateName] = useState('')
+  const [showCloseModal, setShowCloseModal] = useState(false)
+  const [closeReasons, setCloseReasons] = useState<ICloseReason[]>([])
+  const [selectedReasonId, setSelectedReasonId] = useState('')
+  const [closing, setClosing] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -101,6 +105,32 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
       ? Math.max(0, Math.round((new Date(conversation.windowExpiresAt).getTime() - Date.now()) / 60000))
       : null
 
+  async function handleOpenCloseModal() {
+    const res = await fetch('/api/config/close-reasons')
+    if (res.ok) {
+      const data = await res.json()
+      setCloseReasons(data.filter((r: ICloseReason) => r.active))
+    }
+    setSelectedReasonId('')
+    setShowCloseModal(true)
+  }
+
+  async function handleClose(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!selectedReasonId || closing) return
+    setClosing(true)
+    const res = await fetch(`/api/conversations/${conversation._id}/close`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ closeReasonId: selectedReasonId }),
+    })
+    setClosing(false)
+    if (res.ok) {
+      setShowCloseModal(false)
+      onStatusChange()
+    }
+  }
+
   async function handleReopen(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!templateName.trim() || reopening) return
@@ -139,9 +169,14 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
               ⏰ Ventana cerrada
             </span>
           )}
-          {(isBot || isHuman) && windowMinutesLeft !== null && windowMinutesLeft < 60 && (
+          {(isBot || isHuman) && !windowExpired && windowMinutesLeft !== null && windowMinutesLeft < 60 && (
             <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-yellow-900/60 text-yellow-300 border border-yellow-700">
               ⏳ {windowMinutesLeft}m restantes
+            </span>
+          )}
+          {(isBot || isHuman) && !windowExpired && windowMinutesLeft !== null && windowMinutesLeft >= 60 && (
+            <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-900/40 text-green-400 border border-green-800">
+              ✅ Ventana {Math.floor(windowMinutesLeft / 60)}h abierta
             </span>
           )}
 
@@ -180,6 +215,16 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
               Devolver al bot
             </button>
           )}
+          {/* Close conversation button */}
+          {(isBot || isHuman) && (
+            <button
+              onClick={handleOpenCloseModal}
+              className="bg-red-700 hover:bg-red-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              🔴 Cerrar conversación
+            </button>
+          )}
+
           {/* Reopen with template button */}
           {isClosed && (
             <button
@@ -241,6 +286,53 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
           <p className="text-xs text-gray-500">
             Conversación cerrada por ventana de 24h. Usa &quot;Retomar conversación&quot; para enviar una plantilla aprobada.
           </p>
+        </div>
+      )}
+
+      {/* Close modal */}
+      {showCloseModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-white font-semibold text-base mb-1">Cerrar conversación</h2>
+            <p className="text-gray-400 text-xs mb-4">Selecciona el motivo de cierre.</p>
+            <form onSubmit={handleClose} className="flex flex-col gap-3">
+              {closeReasons.length === 0 ? (
+                <p className="text-yellow-400 text-xs">No hay motivos de cierre configurados. Ve a Configuración → Motivos de cierre.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {closeReasons.map((r) => (
+                    <label key={r._id} className="flex items-center gap-3 cursor-pointer p-2.5 rounded-xl hover:bg-gray-800 transition-colors">
+                      <input
+                        type="radio"
+                        name="reason"
+                        value={r._id}
+                        checked={selectedReasonId === r._id}
+                        onChange={() => setSelectedReasonId(r._id)}
+                        className="accent-red-500"
+                      />
+                      <span className="text-white text-sm">{r.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 justify-end mt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowCloseModal(false)}
+                  className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedReasonId || closing || closeReasons.length === 0}
+                  className="bg-red-700 hover:bg-red-600 disabled:bg-gray-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+                >
+                  {closing ? 'Cerrando...' : 'Confirmar cierre'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
