@@ -62,6 +62,25 @@ export function extractImageUrls(text: string): { cleanText: string; imageUrls: 
   return { cleanText: cleanLines.join('\n').trim(), imageUrls }
 }
 
+export async function sendWhatsAppTemplate(
+  to: string,
+  templateName: string,
+  languageCode: string,
+  components: Record<string, unknown>[] = []
+): Promise<string | null> {
+  return sendToWhatsApp({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      ...(components.length > 0 ? { components } : {}),
+    },
+  })
+}
+
 export interface IncomingWhatsAppMessage {
   from: string
   name: string

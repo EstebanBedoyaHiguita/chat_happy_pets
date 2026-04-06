@@ -14,6 +14,9 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
   const [takingOver, setTakingOver] = useState(false)
+  const [reopening, setReopening] = useState(false)
+  const [showReopenModal, setShowReopenModal] = useState(false)
+  const [templateName, setTemplateName] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -65,7 +68,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     onStatusChange()
   }
 
-  async function handleSendReply(e: React.FormEvent) {
+  async function handleSendReply(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!reply.trim() || sending) return
 
@@ -87,6 +90,33 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
 
   const isHuman = conversation.status === 'human'
   const isBot = conversation.status === 'bot'
+  const isClosed = conversation.status === 'closed'
+
+  const windowExpired =
+    conversation.windowExpiresAt != null &&
+    new Date(conversation.windowExpiresAt) < new Date()
+
+  const windowMinutesLeft =
+    conversation.windowExpiresAt && !windowExpired
+      ? Math.max(0, Math.round((new Date(conversation.windowExpiresAt).getTime() - Date.now()) / 60000))
+      : null
+
+  async function handleReopen(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!templateName.trim() || reopening) return
+    setReopening(true)
+    const res = await fetch(`/api/conversations/${conversation._id}/reopen`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateName: templateName.trim(), languageCode: 'es' }),
+    })
+    setReopening(false)
+    if (res.ok) {
+      setShowReopenModal(false)
+      setTemplateName('')
+      onStatusChange()
+    }
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-950">
@@ -103,6 +133,18 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Window expiry badge */}
+          {(isBot || isHuman) && windowExpired && (
+            <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-red-900/60 text-red-300 border border-red-700">
+              ⏰ Ventana cerrada
+            </span>
+          )}
+          {(isBot || isHuman) && windowMinutesLeft !== null && windowMinutesLeft < 60 && (
+            <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-yellow-900/60 text-yellow-300 border border-yellow-700">
+              ⏳ {windowMinutesLeft}m restantes
+            </span>
+          )}
+
           {/* Status badge */}
           <span
             className={`text-xs px-2.5 py-1 rounded-full font-medium ${
@@ -138,12 +180,20 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
               Devolver al bot
             </button>
           )}
+          {/* Reopen with template button */}
+          {isClosed && (
+            <button
+              onClick={() => setShowReopenModal(true)}
+              className="bg-purple-700 hover:bg-purple-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            >
+              📨 Retomar conversación
+            </button>
+          )}
         </div>
       </div>
 
       {/* Messages */}
       <div ref={scrollContainerRef} onScroll={checkIfAtBottom} className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
-
         {messages.length === 0 && (
           <div className="text-center text-gray-600 text-sm pt-16">
             No hay mensajes aún
@@ -183,6 +233,52 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
           <p className="text-xs text-gray-500">
             El bot está respondiendo automáticamente. Haz clic en &quot;Tomar conversación&quot; para responder manualmente.
           </p>
+        </div>
+      )}
+
+      {isClosed && (
+        <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-900 text-center">
+          <p className="text-xs text-gray-500">
+            Conversación cerrada por ventana de 24h. Usa &quot;Retomar conversación&quot; para enviar una plantilla aprobada.
+          </p>
+        </div>
+      )}
+
+      {/* Reopen modal */}
+      {showReopenModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-white font-semibold text-base mb-1">Retomar conversación</h2>
+            <p className="text-gray-400 text-xs mb-4">
+              Ingresa el nombre exacto de la plantilla aprobada en Meta para enviarla a {conversation.name}.
+            </p>
+            <form onSubmit={handleReopen} className="flex flex-col gap-3">
+              <input
+                type="text"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+                placeholder="ej: retomar_conversacion"
+                className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowReopenModal(false)}
+                  className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!templateName.trim() || reopening}
+                  className="bg-purple-700 hover:bg-purple-600 disabled:bg-gray-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+                >
+                  {reopening ? 'Enviando...' : 'Enviar plantilla'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

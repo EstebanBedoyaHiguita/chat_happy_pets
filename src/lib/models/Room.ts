@@ -11,6 +11,7 @@ export interface RoomDoc extends Document {
   assignedTo?: string
   lastMessage: string
   lastMessageAt: Date
+  windowExpiresAt: Date | null
   unreadCount: number
   contextSummary: string
 }
@@ -30,6 +31,7 @@ const RoomSchema = new Schema<RoomDoc>(
     assignedTo: { type: String },
     lastMessage: { type: String, default: '' },
     lastMessageAt: { type: Date, default: Date.now },
+    windowExpiresAt: { type: Date, default: null },
     unreadCount: { type: Number, default: 0 },
     contextSummary: { type: String, default: '' },
   },

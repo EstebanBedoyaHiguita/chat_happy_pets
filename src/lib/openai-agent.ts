@@ -229,7 +229,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt + summarySection + transferInstructions },
-    ...conversationHistory.slice(-6).map((m) => ({
+    ...conversationHistory.slice(-12).map((m) => ({
       role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.content,
     })),

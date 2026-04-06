@@ -14,6 +14,7 @@ export interface IRoom {
   assignedTo?: string
   lastMessage: string
   lastMessageAt: string
+  windowExpiresAt: string | null
   unreadCount: number
   contextSummary: string
   createdAt: string
