@@ -199,33 +199,12 @@ export interface AgentResponse {
   transferReason?: string
 }
 
-async function extractKnownData(history: IMessage[]): Promise<string> {
-  if (history.length === 0) return ''
-  const transcript = history
-    .map((m) => (m.direction === 'inbound' ? 'Cliente' : 'Paula') + ': ' + m.content.substring(0, 400))
-    .join('\n')
-  const res = await getOpenAI().chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0,
-    messages: [
-      {
-        role: 'system',
-        content: `Extrae SOLO los datos concretos que el cliente ya mencionó en esta conversación. Responde en este formato exacto (omite los que no se mencionaron):
-- Tipo de mascota: [perro/gato]
-- Nombre de la mascota: [nombre]
-- Edad de la mascota: [edad]
-- Peso de la mascota: [peso]
-- Alimento actual: [marca/comida]
-- Nombre del cliente: [nombre]
-- Dirección: [dirección]
-
-Si no se mencionó algún dato, NO lo incluyas. Si no hay ningún dato, responde: NINGUNO`,
-      },
-      { role: 'user', content: transcript },
-    ],
-  })
-  const result = res.choices[0].message.content?.trim() ?? ''
-  return result === 'NINGUNO' ? '' : result
+export interface RoomKnownData {
+  name?: string
+  petName?: string
+  petAge?: string
+  petWeight?: string
+  address?: string
 }
 
 export async function runAgent(
@@ -236,21 +215,22 @@ export async function runAgent(
   model = 'gpt-4o-mini',
   temperature = 0.7,
   contextSummary = '',
-  waId = ''
+  waId = '',
+  roomData: RoomKnownData = {}
 ): Promise<AgentResponse> {
   const summarySection = contextSummary
-    ? `
-CONTEXTO PREVIO DE ESTA CONVERSACIÓN (resumen):
-${contextSummary}
-`
+    ? `\nCONTEXTO PREVIO DE ESTA CONVERSACIÓN (resumen):\n${contextSummary}\n`
     : ''
 
-  const knownData = await extractKnownData(conversationHistory)
-  const knownDataSection = knownData
-    ? `
-DATOS YA CONOCIDOS DEL CLIENTE (NO volver a preguntar estos):
-${knownData}
-`
+  const knownLines: string[] = []
+  if (roomData.name && roomData.name !== 'Desconocido') knownLines.push(`- Nombre del cliente: ${roomData.name}`)
+  if (roomData.petName) knownLines.push(`- Nombre de la mascota: ${roomData.petName}`)
+  if (roomData.petAge) knownLines.push(`- Edad de la mascota: ${roomData.petAge}`)
+  if (roomData.petWeight) knownLines.push(`- Peso de la mascota: ${roomData.petWeight}`)
+  if (roomData.address) knownLines.push(`- Dirección de entrega: ${roomData.address}`)
+
+  const knownDataSection = knownLines.length > 0
+    ? `\nDATOS YA GUARDADOS DEL CLIENTE — NO VOLVER A PREGUNTAR ESTOS BAJO NINGUNA CIRCUNSTANCIA:\n${knownLines.join('\n')}\n`
     : ''
 
   const transferInstructions = `

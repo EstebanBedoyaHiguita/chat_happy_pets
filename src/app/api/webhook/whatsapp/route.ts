@@ -4,7 +4,7 @@ import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
 import { parseWebhookPayload, sendWhatsAppMessage, sendWhatsAppImage, extractImageUrls } from '@/lib/whatsapp'
-import { runAgent, summarizeHistory } from '@/lib/openai-agent'
+import { runAgent, summarizeHistory, RoomKnownData } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 
 // GET: Meta webhook verification
@@ -103,6 +103,14 @@ async function processMessage(parsed: {
   const history = await Message.find({ roomId: room._id }).sort({ timestamp: 1 }).limit(6)
 
   // Run AI agent
+  const roomData: RoomKnownData = {
+    name: room.name,
+    petName: room.petName || undefined,
+    petAge: room.petAge || undefined,
+    petWeight: room.petWeight || undefined,
+    address: room.address || undefined,
+  }
+
   const agentResponse = await runAgent(
     parsed.text,
     history.map((m) => ({
@@ -121,7 +129,8 @@ async function processMessage(parsed: {
     config.aiModel,
     config.temperature,
     room.contextSummary ?? '',
-    parsed.from
+    parsed.from,
+    roomData
   )
 
   // Extract images from response and send text + images separately
