@@ -71,6 +71,16 @@ async function processMessage(parsed: {
     timestamp: new Date(),
   })
 
+  // If closed and client writes again, reactivate to bot
+  if (room.status === 'closed') {
+    room.status = 'bot'
+    room.closeReasonId = undefined
+    room.closeReasonName = undefined
+    room.closedBy = undefined
+    room.windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    await room.save()
+  }
+
   // If conversation is in human mode, don't respond
   if (room.status !== 'bot') return
 
