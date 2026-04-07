@@ -229,10 +229,6 @@ export async function runAgent(
   if (roomData.petWeight) knownLines.push(`- Peso de la mascota: ${roomData.petWeight}`)
   if (roomData.address) knownLines.push(`- Dirección de entrega: ${roomData.address}`)
 
-  const knownDataSection = knownLines.length > 0
-    ? `\nDATOS YA GUARDADOS DEL CLIENTE — NO VOLVER A PREGUNTAR ESTOS BAJO NINGUNA CIRCUNSTANCIA:\n${knownLines.join('\n')}\n`
-    : ''
-
   const transferInstructions = `
 
 FORMATO DE RESPUESTA — CRÍTICO:
@@ -268,7 +264,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
   if (knownLines.length > 0) {
     messages.push({
       role: 'system',
-      content: `⚠️ RECORDATORIO OBLIGATORIO — DATOS YA GUARDADOS EN BASE DE DATOS:\n${knownLines.join('\n')}\n\nESTÁ TERMINANTEMENTE PROHIBIDO pedir estos datos al cliente. Ya los tienes confirmados. Úsalos directamente en tu respuesta sin mencionar que los tienes ni volver a pedirlos.`,
+      content: `⚠️ DATOS YA GUARDADOS — NO VOLVER A PEDIR:\n${knownLines.join('\n')}\n\nREGLA: Sigue el flujo normal de conversación. Saluda primero, entiende qué necesita el cliente. SOLO cuando el cliente pida una recomendación o producto específico, usa estos datos para personalizar la respuesta. NUNCA menciones estos datos espontáneamente ni los uses para saltar pasos de la conversación.`,
     })
   }
 
