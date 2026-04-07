@@ -52,8 +52,10 @@ export function extractImageUrls(text: string): { cleanText: string; imageUrls: 
   const imageUrls: string[] = []
   const lines = text.split('\n')
   const cleanLines = lines.filter((line) => {
-    const match = line.trim().match(/^-?\s*Imagen:\s*(https?:\/\/\S+)/i)
-    if (match) {
+    const trimmed = line.trim()
+    // Match lines that are only a URL (bare or with "Imagen:" prefix)
+    const match = trimmed.match(/^(?:-?\s*(?:Imagen|imagen|img):\s*)?(https?:\/\/\S+)$/)
+    if (match && match[1]) {
       imageUrls.push(match[1])
       return false
     }

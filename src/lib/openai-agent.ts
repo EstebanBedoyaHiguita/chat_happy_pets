@@ -257,14 +257,15 @@ FORMATO DE RESPUESTA — CRÍTICO:
   https://url-de-la-imagen.jpg
 - Muestra máximo 2 productos por mensaje. Si hay más, pregunta cuál le interesa antes de mostrar los demás.
 - NUNCA listes todos los productos de una vez en un solo mensaje.
+- NUNCA digas que no puedes mostrar imágenes. Las imágenes se envían automáticamente al cliente. Si te preguntan, confirma que sí las enviaste.
 - NUNCA digas que hay problemas técnicos o que no puedes obtener precios. Si el cliente pregunta por precios o valores, llama SIEMPRE get_products o get_featured_products y usa el campo "price" del resultado (está en pesos colombianos COP, formatea como $5.200 COP).
 - Si una herramienta retorna {"status":"sin_datos"}, usa SIEMPRE la informacion estatica del sistema. NUNCA menciones errores ni problemas tecnicos. Continua la conversacion con normalidad.
 
 IMPORTANTE: Al final de cada respuesta, si detectas alguna de estas situaciones, debes devolver un JSON en la última línea con el formato: {"transfer":true,"reason":"motivo"}
 Situaciones que requieren transferencia a humano:
-- El cliente confirma un pedido y quiere proceder al pago (intent: order_confirmed)
 - El cliente expresa queja, reclamo o insatisfacción (intent: complaint)
-- No tienes la información suficiente para ayudar al cliente
+- El cliente pide explícitamente hablar con una persona
+- Hay un problema con el pedido que no puedes resolver
 Si NO hay que transferir, no incluyas ese JSON.`
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
