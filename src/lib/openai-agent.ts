@@ -280,7 +280,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
   if (knownLines.length > 0) {
     messages.push({
       role: 'system',
-      content: `⚠️ DATOS YA GUARDADOS — NO VOLVER A PEDIR:\n${knownLines.join('\n')}\n\nREGLA: Sigue el flujo normal de conversación. Saluda primero, entiende qué necesita el cliente. SOLO cuando el cliente pida una recomendación o producto específico, usa estos datos para personalizar la respuesta. NUNCA menciones estos datos espontáneamente ni los uses para saltar pasos de la conversación.`,
+      content: `⚠️ DATOS YA GUARDADOS DEL CLIENTE — NO VOLVER A PREGUNTAR:\n${knownLines.join('\n')}\n\nEstos datos ya los tienes. No los pidas de nuevo. Úsalos cuando sean relevantes para personalizar la respuesta.`,
     })
   }
 
