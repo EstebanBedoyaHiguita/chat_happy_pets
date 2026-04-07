@@ -257,13 +257,22 @@ Situaciones que requieren transferencia a humano:
 Si NO hay que transferir, no incluyas ese JSON.`
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: 'system', content: systemPrompt + summarySection + knownDataSection + transferInstructions },
+    { role: 'system', content: systemPrompt + summarySection + transferInstructions },
     ...conversationHistory.slice(-12).map((m) => ({
       role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.content,
     })),
-    { role: 'user', content: userMessage },
   ]
+
+  // Inject known data as a late system message RIGHT before user message so it's fresh
+  if (knownLines.length > 0) {
+    messages.push({
+      role: 'system',
+      content: `⚠️ RECORDATORIO OBLIGATORIO — DATOS YA GUARDADOS EN BASE DE DATOS:\n${knownLines.join('\n')}\n\nESTÁ TERMINANTEMENTE PROHIBIDO pedir estos datos al cliente. Ya los tienes confirmados. Úsalos directamente en tu respuesta sin mencionar que los tienes ni volver a pedirlos.`,
+    })
+  }
+
+  messages.push({ role: 'user', content: userMessage })
 
   let response = await getOpenAI().chat.completions.create({
     model,
