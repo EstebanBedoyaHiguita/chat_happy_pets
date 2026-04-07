@@ -195,6 +195,35 @@ export interface AgentResponse {
   transferReason?: string
 }
 
+async function extractKnownData(history: IMessage[]): Promise<string> {
+  if (history.length === 0) return ''
+  const transcript = history
+    .map((m) => (m.direction === 'inbound' ? 'Cliente' : 'Paula') + ': ' + m.content.substring(0, 400))
+    .join('\n')
+  const res = await getOpenAI().chat.completions.create({
+    model: 'gpt-4o-mini',
+    temperature: 0,
+    messages: [
+      {
+        role: 'system',
+        content: `Extrae SOLO los datos concretos que el cliente ya mencionó en esta conversación. Responde en este formato exacto (omite los que no se mencionaron):
+- Tipo de mascota: [perro/gato]
+- Nombre de la mascota: [nombre]
+- Edad de la mascota: [edad]
+- Peso de la mascota: [peso]
+- Alimento actual: [marca/comida]
+- Nombre del cliente: [nombre]
+- Dirección: [dirección]
+
+Si no se mencionó algún dato, NO lo incluyas. Si no hay ningún dato, responde: NINGUNO`,
+      },
+      { role: 'user', content: transcript },
+    ],
+  })
+  const result = res.choices[0].message.content?.trim() ?? ''
+  return result === 'NINGUNO' ? '' : result
+}
+
 export async function runAgent(
   userMessage: string,
   conversationHistory: IMessage[],
@@ -209,6 +238,14 @@ export async function runAgent(
     ? `
 CONTEXTO PREVIO DE ESTA CONVERSACIÓN (resumen):
 ${contextSummary}
+`
+    : ''
+
+  const knownData = await extractKnownData(conversationHistory)
+  const knownDataSection = knownData
+    ? `
+DATOS YA CONOCIDOS DEL CLIENTE (NO volver a preguntar estos):
+${knownData}
 `
     : ''
 
@@ -236,7 +273,7 @@ Situaciones que requieren transferencia a humano:
 Si NO hay que transferir, no incluyas ese JSON.`
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: 'system', content: systemPrompt + summarySection + transferInstructions },
+    { role: 'system', content: systemPrompt + summarySection + knownDataSection + transferInstructions },
     ...conversationHistory.slice(-12).map((m) => ({
       role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.content,
