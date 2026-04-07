@@ -103,12 +103,14 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'update_customer_info',
-      description: 'Actualiza la informacion del cliente (nombre, mascota, direccion) en cuanto el cliente la proporcione en la conversacion.',
+      description: 'LLAMA ESTA FUNCIÓN INMEDIATAMENTE cada vez que el cliente mencione cualquier dato: su nombre, el nombre de su mascota, la edad de la mascota, el peso de la mascota o su dirección. No esperes a tener todos los datos, llámala cada vez que aprendas uno nuevo.',
       parameters: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Nombre real del cliente' },
           petName: { type: 'string', description: 'Nombre de la mascota' },
+          petAge: { type: 'string', description: 'Edad de la mascota (ej: 8 años)' },
+          petWeight: { type: 'string', description: 'Peso de la mascota (ej: 30 kg)' },
           address: { type: 'string', description: 'Direccion de entrega' },
         },
       },
@@ -145,6 +147,8 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           const update: Record<string, string> = {}
           if (args.name) update.name = args.name as string
           if (args.petName) update.petName = args.petName as string
+          if (args.petAge) update.petAge = args.petAge as string
+          if (args.petWeight) update.petWeight = args.petWeight as string
           if (args.address) update.address = args.address as string
           if (Object.keys(update).length > 0) {
             await Room.updateOne({ waId }, { $set: update })

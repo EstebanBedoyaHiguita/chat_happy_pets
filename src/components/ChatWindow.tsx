@@ -273,6 +273,8 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
               { label: 'Nombre', value: conversation.name },
               { label: 'Teléfono', value: conversation.phone },
               { label: 'Mascota', value: conversation.petName },
+              { label: 'Edad mascota', value: conversation.petAge },
+              { label: 'Peso mascota', value: conversation.petWeight },
               { label: 'Dirección', value: conversation.address },
               { label: 'Estado', value: conversation.status },
               ...(conversation.assignedTo ? [{ label: 'Asignado a', value: conversation.assignedTo }] : []),
