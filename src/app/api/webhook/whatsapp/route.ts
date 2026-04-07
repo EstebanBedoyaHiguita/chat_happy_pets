@@ -6,6 +6,25 @@ import { AgentConfig } from '@/lib/models/AgentConfig'
 import { parseWebhookPayload, sendWhatsAppMessage, sendWhatsAppImage, extractImageUrls } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, RoomKnownData } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
+import type { RoomDoc } from '@/lib/models/Room'
+import type { Document } from 'mongoose'
+
+async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
+  const update: Record<string, string> = {}
+
+  // Age: "tiene 8 años", "8 años"
+  const ageMatch = text.match(/(\d+)\s*a[ñn]os?/i)
+  if (ageMatch && !room.petAge) update.petAge = `${ageMatch[1]} años`
+
+  // Weight: "pesa 30 kg", "30 kilos", "30kg"
+  const weightMatch = text.match(/(\d+(?:[.,]\d+)?)\s*k(?:g|ilos?)/i)
+  if (weightMatch && !room.petWeight) update.petWeight = `${weightMatch[1]} kg`
+
+  if (Object.keys(update).length > 0) {
+    await Room.updateOne({ _id: room._id }, { $set: update })
+    Object.assign(room, update)
+  }
+}
 
 // GET: Meta webhook verification
 export async function GET(req: NextRequest) {
@@ -70,6 +89,9 @@ async function processMessage(parsed: {
     waMessageId: parsed.messageId,
     timestamp: new Date(),
   })
+
+  // Auto-extract pet data from client message and save to room
+  await autoExtractAndSave(room, parsed.text)
 
   // If closed and client writes again, reactivate to bot
   if (room.status === 'closed') {
