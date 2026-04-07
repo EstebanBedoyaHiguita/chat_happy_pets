@@ -214,9 +214,17 @@ ${contextSummary}
 
   const transferInstructions = `
 
-FORMATO DE RESPUESTA:
-- Nunca uses sintaxis markdown para imágenes (no uses ![texto](url)). Si quieres compartir la imagen de un producto, escribe la URL directamente en el texto así: "Imagen: https://..."
-- Puedes usar texto plano, saltos de línea y emojis. No uses otro tipo de markdown.
+FORMATO DE RESPUESTA — CRÍTICO:
+- PROHIBIDO usar asteriscos, negritas, cursivas ni ningún markdown. NUNCA escribas **texto** ni *texto*.
+- Escribe exactamente como en un WhatsApp real: texto plano, saltos de línea y emojis únicamente.
+- Al mostrar un producto NO escribas etiquetas como "Precio:", "Descripción:", "Imagen:". Escribe directamente el valor: el número del precio, el texto de la descripción y la URL de la imagen en líneas separadas.
+- Ejemplo correcto de producto:
+  🥩 Dieta Barf Pollo
+  $4.300 COP
+  Una opción económica y deliciosa para tu perro 🐶
+  https://url-de-la-imagen.jpg
+- Muestra máximo 2 productos por mensaje. Si hay más, pregunta cuál le interesa antes de mostrar los demás.
+- NUNCA listes todos los productos de una vez en un solo mensaje.
 - NUNCA digas que hay problemas técnicos o que no puedes obtener precios. Si el cliente pregunta por precios o valores, llama SIEMPRE get_products o get_featured_products y usa el campo "price" del resultado (está en pesos colombianos COP, formatea como $5.200 COP).
 - Si una herramienta retorna {"status":"sin_datos"}, usa SIEMPRE la informacion estatica del sistema. NUNCA menciones errores ni problemas tecnicos. Continua la conversacion con normalidad.
 
