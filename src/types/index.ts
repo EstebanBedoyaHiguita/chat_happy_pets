@@ -9,6 +9,7 @@ export interface IRoom {
   name: string
   phone: string
   petName: string
+  petType: string
   petAge: string
   petWeight: string
   address: string

@@ -272,6 +272,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
             {[
               { label: 'Nombre', value: conversation.name },
               { label: 'Teléfono', value: conversation.phone },
+              { label: 'Tipo mascota', value: conversation.petType },
               { label: 'Mascota', value: conversation.petName },
               { label: 'Edad mascota', value: conversation.petAge },
               { label: 'Peso mascota', value: conversation.petWeight },

@@ -108,6 +108,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Nombre real del cliente' },
+          petType: { type: 'string', description: 'Tipo de mascota: Perro o Gato' },
           petName: { type: 'string', description: 'Nombre de la mascota' },
           petAge: { type: 'string', description: 'Edad de la mascota (ej: 8 años)' },
           petWeight: { type: 'string', description: 'Peso de la mascota (ej: 30 kg)' },
@@ -146,6 +147,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           const { Room } = await import('./models/Room')
           const update: Record<string, string> = {}
           if (args.name) update.name = args.name as string
+          if (args.petType) update.petType = args.petType as string
           if (args.petName) update.petName = args.petName as string
           if (args.petAge) update.petAge = args.petAge as string
           if (args.petWeight) update.petWeight = args.petWeight as string
@@ -184,8 +186,19 @@ export async function summarizeHistory(messages: IMessage[]): Promise<string> {
     messages: [
       {
         role: 'system',
-        content:
-          'Eres un asistente que resume conversaciones de WhatsApp de forma concisa. Resume los puntos clave: qué productos preguntó el cliente, qué información se le dio, qué decidió o pidió. Máximo 200 palabras en español.',
+        content: `Eres un asistente que resume conversaciones de WhatsApp para una tienda de alimentos para mascotas.
+Extrae y lista TODOS los hechos mencionados en este formato:
+- Tipo de mascota: (perro/gato si se mencionó)
+- Nombre de la mascota: (si se mencionó)
+- Edad: (si se mencionó)
+- Peso: (si se mencionó)
+- Alimento actual: (marca/tipo que le dan actualmente)
+- Interés del cliente: (qué productos o información pidió)
+- Decisiones tomadas: (qué eligió o confirmó)
+- Dirección: (si se mencionó)
+- Otros datos relevantes: (cualquier otro hecho importante)
+
+Si no se mencionó algún dato, omite esa línea. Máximo 200 palabras en español. Este resumen lo usará el bot para continuar la conversación sin repetir preguntas.`,
       },
       { role: 'user', content: 'Resume esta conversacion:\n' + transcript },
     ],
@@ -202,6 +215,7 @@ export interface AgentResponse {
 export interface RoomKnownData {
   name?: string
   petName?: string
+  petType?: string
   petAge?: string
   petWeight?: string
   address?: string
@@ -224,6 +238,7 @@ export async function runAgent(
 
   const knownLines: string[] = []
   if (roomData.name && roomData.name !== 'Desconocido') knownLines.push(`- Nombre del cliente: ${roomData.name}`)
+  if (roomData.petType) knownLines.push(`- Tipo de mascota: ${roomData.petType}`)
   if (roomData.petName) knownLines.push(`- Nombre de la mascota: ${roomData.petName}`)
   if (roomData.petAge) knownLines.push(`- Edad de la mascota: ${roomData.petAge}`)
   if (roomData.petWeight) knownLines.push(`- Peso de la mascota: ${roomData.petWeight}`)

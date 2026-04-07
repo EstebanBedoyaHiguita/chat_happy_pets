@@ -6,6 +6,7 @@ export interface RoomDoc extends Document {
   name: string
   phone: string
   petName: string
+  petType: string
   petAge: string
   petWeight: string
   address: string
@@ -27,6 +28,7 @@ const RoomSchema = new Schema<RoomDoc>(
     name: { type: String, default: 'Desconocido' },
     phone: { type: String, required: true },
     petName: { type: String, default: '' },
+    petType: { type: String, default: '' },
     petAge: { type: String, default: '' },
     petWeight: { type: String, default: '' },
     address: { type: String, default: '' },

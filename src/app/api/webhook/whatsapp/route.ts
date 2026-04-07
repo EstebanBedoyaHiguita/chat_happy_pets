@@ -12,6 +12,12 @@ import type { Document } from 'mongoose'
 async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
   const update: Record<string, string> = {}
 
+  // Pet type: perro/gato
+  if (!room.petType) {
+    if (/\b(perro|perrita|cachorro|can)\b/i.test(text)) update.petType = 'Perro'
+    else if (/\b(gato|gatita|gatito|felino)\b/i.test(text)) update.petType = 'Gato'
+  }
+
   // Age: "tiene 8 años", "8 años"
   const ageMatch = text.match(/(\d+)\s*a[ñn]os?/i)
   if (ageMatch && !room.petAge) update.petAge = `${ageMatch[1]} años`
@@ -121,13 +127,17 @@ async function processMessage(parsed: {
     return
   }
 
-  // Get last 6 messages for context
-  const history = await Message.find({ roomId: room._id }).sort({ timestamp: 1 }).limit(6)
+  // Get last 10 messages for context (most recent, in chronological order)
+  const history = await Message.find({ roomId: room._id })
+    .sort({ timestamp: -1 })
+    .limit(10)
+    .then((msgs) => msgs.reverse())
 
   // Run AI agent
   const roomData: RoomKnownData = {
     name: room.name,
     petName: room.petName || undefined,
+    petType: room.petType || undefined,
     petAge: room.petAge || undefined,
     petWeight: room.petWeight || undefined,
     address: room.address || undefined,
