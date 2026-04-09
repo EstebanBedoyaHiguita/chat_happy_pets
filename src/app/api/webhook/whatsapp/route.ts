@@ -171,14 +171,11 @@ async function processMessage(parsed: {
   let waMessageId: string | null = null
 
   if (agentResponse.products.length > 0) {
-    // Send intro text first (the bot's opening line before listing products)
-    waMessageId = await sendWhatsAppMessage(parsed.from, cleanText)
-
     // Send each product individually: image first, then name + price + description
     for (const product of agentResponse.products as AgentProduct[]) {
       if (product.imageUrl) await sendWhatsAppImage(parsed.from, product.imageUrl)
       const productText = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
-      await sendWhatsAppMessage(parsed.from, productText)
+      waMessageId = await sendWhatsAppMessage(parsed.from, productText)
     }
   } else {
     // No products — send text normally
