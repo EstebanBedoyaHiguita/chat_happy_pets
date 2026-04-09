@@ -158,19 +158,26 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
-        // Get shipping cost from backend
-        const shippingData = await getShippingCost(args.cityId as string)
+        // Get shipping cost and fresh product prices from backend
+        const [shippingData, freshProductsRaw] = await Promise.all([
+          getShippingCost(args.cityId as string),
+          getProducts(),
+        ])
         const shipping: number = shippingData?.shippingCost ?? shippingData?.shipping ?? 10000
+        const freshList: Record<string, unknown>[] = Array.isArray(freshProductsRaw)
+          ? freshProductsRaw
+          : Array.isArray(freshProductsRaw?.data) ? freshProductsRaw.data : []
 
-        // Map items to order format using collected products for _id and image
+        // Map items using fresh prices from backend
         const items = ((args.items as { productName: string; quantity: number }[]) ?? []).map((item) => {
-          const found = collectedProducts.find((p) => p.name === item.productName)
+          const found = freshList.find((p) => (p.name as string) === item.productName)
+          const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
           return {
-            product: found?._id ?? '',
+            product: (found?._id as string) ?? '',
             name: item.productName,
-            price: found?.price ?? 0,
+            price: (found?.price as number) ?? 0,
             quantity: item.quantity,
-            image: found?.image ?? '',
+            image: img,
           }
         })
 
@@ -327,7 +334,8 @@ FORMATO DE RESPUESTA — CRÍTICO:
 - Muestra máximo 2 productos por mensaje. Si hay más, pregunta cuál le interesa antes de mostrar los demás.
 - NUNCA listes todos los productos de una vez en un solo mensaje.
 - NUNCA digas que no puedes mostrar imágenes. Las imágenes se envían automáticamente al cliente. Si te preguntan, confirma que sí las enviaste.
-- NUNCA menciones, listes ni describas productos sin haber llamado PRIMERO a get_products en esta misma respuesta. Aunque los hayas mostrado antes en la conversación, SIEMPRE llama get_products de nuevo para obtener los datos actualizados con imágenes.
+- Si el cliente pide VER los productos o el catálogo completo, llama get_products y muéstralos. Las imágenes se enviarán automáticamente.
+- Si el cliente pregunta por UN producto específico (precio, descripción, etc.), responde directamente con la información que ya tienes en el historial. NO llames get_products ni envíes imágenes de nuevo.
 - NUNCA digas que hay problemas técnicos o que no puedes obtener precios.
 - Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que en este momento no puedes mostrar el catálogo y pide al cliente que intente en un momento.
 
