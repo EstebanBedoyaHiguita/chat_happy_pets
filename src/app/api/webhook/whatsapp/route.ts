@@ -165,10 +165,12 @@ async function processMessage(parsed: {
     roomData
   )
 
-  // Extract images from response and send text + images separately
-  const { cleanText, imageUrls } = extractImageUrls(agentResponse.text)
+  // Send text (strip any leftover URLs from text)
+  const { cleanText } = extractImageUrls(agentResponse.text)
   const waMessageId = await sendWhatsAppMessage(parsed.from, cleanText)
-  for (const url of imageUrls) {
+
+  // Send images captured directly from product API results
+  for (const url of agentResponse.imageUrls) {
     await sendWhatsAppImage(parsed.from, url)
   }
   await Message.create({

@@ -210,6 +210,7 @@ export interface AgentResponse {
   text: string
   transfer: boolean
   transferReason?: string
+  imageUrls: string[]
 }
 
 export interface RoomKnownData {
@@ -295,6 +296,10 @@ Si NO hay que transferir, no incluyas ese JSON.`
     tool_choice: 'auto',
   })
 
+  // Collect image URLs directly from product tool results
+  const collectedImageUrls: string[] = []
+  const HAPPY_PETS_BASE = process.env.HAPPY_PETS_API_URL ?? ''
+
   // Handle tool calls
   while (response.choices[0].finish_reason === 'tool_calls') {
     const assistantMessage = response.choices[0].message
@@ -305,6 +310,23 @@ Si NO hay que transferir, no incluyas ese JSON.`
     for (const toolCall of toolCalls) {
       const args = JSON.parse(toolCall.function.arguments || '{}')
       const result = await executeTool(toolCall.function.name, args, waId)
+
+      // Extract image URLs from product catalog calls
+      if (toolCall.function.name === 'get_products' || toolCall.function.name === 'get_featured_products') {
+        try {
+          const products = JSON.parse(result)
+          if (Array.isArray(products)) {
+            for (const product of products.slice(0, 2)) {
+              const img = Array.isArray(product.images) ? product.images[0] : null
+              if (img) {
+                const url = img.startsWith('http') ? img : `${HAPPY_PETS_BASE}${img}`
+                collectedImageUrls.push(url)
+              }
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+
       messages.push({
         role: 'tool',
         tool_call_id: toolCall.id,
@@ -349,5 +371,5 @@ Si NO hay que transferir, no incluyas ese JSON.`
     // No transfer JSON found, that's fine
   }
 
-  return { text: cleanText, transfer, transferReason }
+  return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls }
 }
