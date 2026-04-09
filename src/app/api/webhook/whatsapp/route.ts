@@ -171,28 +171,36 @@ async function processMessage(parsed: {
   let waMessageId: string | null = null
 
   if (agentResponse.products.length > 0) {
-    // Send each product as image with caption (max 5 products)
+    // Send each product as image with caption (max 5 products) and save to DB
     for (const product of (agentResponse.products as AgentProduct[]).slice(0, 5)) {
       const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
+      const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
       if (product.imageUrl) {
         waMessageId = await sendWhatsAppImage(parsed.from, product.imageUrl, caption)
       } else {
         waMessageId = await sendWhatsAppMessage(parsed.from, caption)
       }
+      await Message.create({
+        roomId: room._id,
+        direction: 'outbound',
+        sender: 'bot',
+        content,
+        waMessageId: waMessageId ?? undefined,
+        timestamp: new Date(),
+      })
     }
   } else {
     // No products — send text normally
     waMessageId = await sendWhatsAppMessage(parsed.from, cleanText)
+    await Message.create({
+      roomId: room._id,
+      direction: 'outbound',
+      sender: 'bot',
+      content: cleanText,
+      waMessageId: waMessageId ?? undefined,
+      timestamp: new Date(),
+    })
   }
-
-  await Message.create({
-    roomId: room._id,
-    direction: 'outbound',
-    sender: 'bot',
-    content: cleanText,
-    waMessageId: waMessageId ?? undefined,
-    timestamp: new Date(),
-  })
 
   // Update summary in background if conversation is getting long
   Message.countDocuments({ roomId: room._id }).then((count) => {
