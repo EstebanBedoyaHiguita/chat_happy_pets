@@ -63,6 +63,10 @@ async function processMessage(parsed: {
 }) {
   await connectDB()
 
+  // Deduplicate: ignore already-processed messages
+  const existing = await Message.findOne({ waMessageId: parsed.messageId })
+  if (existing) return
+
   // Get or create room
   let room = await Room.findOne({ waId: parsed.from })
   if (!room) {
