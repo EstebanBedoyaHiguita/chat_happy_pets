@@ -6,6 +6,8 @@ import {
   getProductDetail,
   createOrder,
   registerCustomer,
+  getCities,
+  getShippingCost,
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import type { IMessage, ITransferRule } from '@/types'
@@ -63,17 +65,38 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'get_cities',
+      description: 'Obtiene las ciudades disponibles para entrega. Cada ciudad incluye _id, name, department y zone (zone1=$10.000, zone2=$15.000). Llama esta función cuando el cliente quiera hacer un pedido para mostrarle las ciudades disponibles.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_order',
-      description: 'Crea un pedido en el sistema.',
+      description: 'Crea un pedido confirmado. Llama esta función SOLO cuando el cliente haya confirmado explícitamente los productos, cantidad, ciudad y dirección.',
       parameters: {
         type: 'object',
         properties: {
-          order_data: {
-            type: 'object',
-            description: 'Datos del pedido incluyendo items, dirección de envío y cliente',
+          items: {
+            type: 'array',
+            description: 'Productos del pedido',
+            items: {
+              type: 'object',
+              properties: {
+                productName: { type: 'string', description: 'Nombre exacto del producto como aparece en el catálogo' },
+                quantity: { type: 'number', description: 'Cantidad de paquetes' },
+              },
+              required: ['productName', 'quantity'],
+            },
           },
+          cityId: { type: 'string', description: '_id de la ciudad elegida por el cliente' },
+          cityName: { type: 'string', description: 'Nombre de la ciudad elegida' },
+          department: { type: 'string', description: 'Departamento de la ciudad' },
+          address: { type: 'string', description: 'Dirección exacta de entrega' },
+          notes: { type: 'string', description: 'Notas adicionales del pedido (opcional)' },
         },
-        required: ['order_data'],
+        required: ['items', 'cityId', 'cityName', 'department', 'address'],
       },
     },
   },
@@ -114,7 +137,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ]
 
-async function executeTool(name: string, args: Record<string, unknown>, waId?: string): Promise<string> {
+async function executeTool(name: string, args: Record<string, unknown>, waId?: string, collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}): Promise<string> {
   console.log('[Tool call]', name, JSON.stringify(args))
   try {
     let result
@@ -131,9 +154,49 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
       case 'get_product_detail':
         result = await getProductDetail(args.product_id as string)
         break
-      case 'create_order':
-        result = await createOrder(args.order_data)
+      case 'get_cities':
+        result = await getCities()
         break
+      case 'create_order': {
+        // Get shipping cost from backend
+        const shippingData = await getShippingCost(args.cityId as string)
+        const shipping: number = shippingData?.shippingCost ?? shippingData?.shipping ?? 10000
+
+        // Map items to order format using collected products for _id and image
+        const items = ((args.items as { productName: string; quantity: number }[]) ?? []).map((item) => {
+          const found = collectedProducts.find((p) => p.name === item.productName)
+          return {
+            product: found?._id ?? '',
+            name: item.productName,
+            price: found?.price ?? 0,
+            quantity: item.quantity,
+            image: found?.image ?? '',
+          }
+        })
+
+        const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0)
+        const total = subtotal + shipping
+
+        const orderData = {
+          items,
+          subtotal,
+          shipping,
+          total,
+          shippingAddress: {
+            name: roomData?.name ?? '',
+            phone: waId ?? '',
+            email: '',
+            address: args.address as string,
+            city: args.cityName as string,
+            department: args.department as string,
+            notes: (args.notes as string) ?? '',
+          },
+          status: 'pending',
+        }
+
+        result = await createOrder(orderData)
+        break
+      }
       case 'register_customer':
         result = await registerCustomer(args as Parameters<typeof registerCustomer>[0])
         break
@@ -202,10 +265,12 @@ Si no se mencionó algún dato, omite esa línea. Máximo 200 palabras en españ
 }
 
 export interface AgentProduct {
+  _id: string
   name: string
   price: number
   description: string
   imageUrl: string
+  image: string
 }
 
 export interface AgentResponse {
@@ -266,6 +331,19 @@ FORMATO DE RESPUESTA — CRÍTICO:
 - NUNCA digas que hay problemas técnicos o que no puedes obtener precios.
 - Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que en este momento no puedes mostrar el catálogo y pide al cliente que intente en un momento.
 
+FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO:
+1. Cuando el cliente quiera hacer un pedido, llama get_cities y muestra las ciudades disponibles.
+2. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona.
+3. Pregunta la dirección exacta de entrega.
+4. Muestra el resumen del pedido:
+   - Productos y cantidades
+   - Subtotal
+   - Envío
+   - Total
+   Pregunta: ¿Confirmamos el pedido?
+5. Cuando el cliente confirme, llama create_order INMEDIATAMENTE con todos los datos.
+6. Informa al cliente que su pedido quedó registrado y que pronto lo contactarán.
+
 IMPORTANTE: Al final de cada respuesta, si detectas alguna de estas situaciones, debes devolver un JSON en la última línea con el formato: {"transfer":true,"reason":"motivo"}
 Situaciones que requieren transferencia a humano:
 - El cliente expresa queja, reclamo o insatisfacción (intent: complaint)
@@ -313,7 +391,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
     const toolCalls = ((assistantMessage.tool_calls ?? []) as FnCall[]).filter((tc) => tc.type === 'function')
     for (const toolCall of toolCalls) {
       const args = JSON.parse(toolCall.function.arguments || '{}')
-      const result = await executeTool(toolCall.function.name, args, waId)
+      const result = await executeTool(toolCall.function.name, args, waId, collectedProducts, roomData)
 
       // Extract structured product data from catalog calls
       if (toolCall.function.name === 'get_products' || toolCall.function.name === 'get_featured_products') {
@@ -328,10 +406,12 @@ Si NO hay que transferir, no incluyas ese JSON.`
             const img = Array.isArray(p.images) ? (p.images as string[])[0] : null
             const imageUrl = img ? (img.startsWith('http') ? img : `${HAPPY_PETS_BASE}${img}`) : ''
             collectedProducts.push({
+              _id: (p._id as string) ?? '',
               name: (p.name as string) ?? '',
               price: (p.price as number) ?? 0,
               description: (p.description as string) ?? '',
               imageUrl,
+              image: imageUrl,
             })
             if (imageUrl) collectedImageUrls.push(imageUrl)
           }

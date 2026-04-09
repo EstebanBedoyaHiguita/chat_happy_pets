@@ -37,6 +37,14 @@ export async function createOrder(orderData: unknown) {
   })
 }
 
+export async function getCities() {
+  return fetchHP('/api/cities')
+}
+
+export async function getShippingCost(cityId: string) {
+  return fetchHP(`/api/cities/${cityId}/shipping-cost`)
+}
+
 export async function registerCustomer(data: {
   name: string
   email: string
