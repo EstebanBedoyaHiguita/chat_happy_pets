@@ -171,11 +171,14 @@ async function processMessage(parsed: {
   let waMessageId: string | null = null
 
   if (agentResponse.products.length > 0) {
-    // Send each product individually: image first, then name + price + description
-    for (const product of agentResponse.products as AgentProduct[]) {
-      if (product.imageUrl) await sendWhatsAppImage(parsed.from, product.imageUrl)
-      const productText = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
-      waMessageId = await sendWhatsAppMessage(parsed.from, productText)
+    // Send each product as image with caption (max 5 products)
+    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 5)) {
+      const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
+      if (product.imageUrl) {
+        waMessageId = await sendWhatsAppImage(parsed.from, product.imageUrl, caption)
+      } else {
+        waMessageId = await sendWhatsAppMessage(parsed.from, caption)
+      }
     }
   } else {
     // No products — send text normally

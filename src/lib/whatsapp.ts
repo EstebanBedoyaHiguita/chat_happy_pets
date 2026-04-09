@@ -38,13 +38,13 @@ export async function sendWhatsAppMessage(to: string, text: string): Promise<str
   })
 }
 
-export async function sendWhatsAppImage(to: string, imageUrl: string): Promise<string | null> {
+export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: string): Promise<string | null> {
   return sendToWhatsApp({
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to,
     type: 'image',
-    image: { link: imageUrl },
+    image: { link: imageUrl, ...(caption ? { caption } : {}) },
   })
 }
 
