@@ -23,15 +23,10 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'get_products',
-      description: 'Obtiene el catálogo de productos de Happy Pets. Cada producto incluye: _id, name, description, price (en pesos colombianos COP), sku, stock, available, images (array de URLs). Puede filtrarse por categoría.',
+      description: 'Obtiene el catálogo completo de productos de Happy Pets. Cada producto incluye: _id, name, description, price (en pesos colombianos COP), sku, stock, available, images (array de URLs de Cloudinary).',
       parameters: {
         type: 'object',
-        properties: {
-          category: {
-            type: 'string',
-            description: 'ID o slug de la categoría para filtrar productos (opcional)',
-          },
-        },
+        properties: {},
       },
     },
   },
