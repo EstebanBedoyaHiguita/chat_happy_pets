@@ -50,18 +50,25 @@ export async function sendWhatsAppImage(to: string, imageUrl: string): Promise<s
 
 export function extractImageUrls(text: string): { cleanText: string; imageUrls: string[] } {
   const imageUrls: string[] = []
-  const lines = text.split('\n')
-  const cleanLines = lines.filter((line) => {
+
+  // Remove markdown image syntax ![alt](url) and capture the URL
+  let cleaned = text.replace(/!\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g, (_match, _alt, url) => {
+    imageUrls.push(url)
+    return ''
+  })
+
+  // Also remove bare URL-only lines and capture the URL
+  cleaned = cleaned.split('\n').filter((line) => {
     const trimmed = line.trim()
-    // Match lines that are only a URL (bare or with "Imagen:" prefix)
     const match = trimmed.match(/^(?:-?\s*(?:Imagen|imagen|img):\s*)?(https?:\/\/\S+)$/)
     if (match && match[1]) {
       imageUrls.push(match[1])
       return false
     }
     return true
-  })
-  return { cleanText: cleanLines.join('\n').trim(), imageUrls }
+  }).join('\n')
+
+  return { cleanText: cleaned.trim(), imageUrls }
 }
 
 export async function sendWhatsAppTemplate(

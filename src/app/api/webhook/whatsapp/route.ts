@@ -4,7 +4,7 @@ import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
 import { parseWebhookPayload, sendWhatsAppMessage, sendWhatsAppImage, extractImageUrls } from '@/lib/whatsapp'
-import { runAgent, summarizeHistory, RoomKnownData } from '@/lib/openai-agent'
+import { runAgent, summarizeHistory, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc } from '@/lib/models/Room'
 import type { Document } from 'mongoose'
@@ -165,14 +165,26 @@ async function processMessage(parsed: {
     roomData
   )
 
-  // Send text (strip any leftover URLs from text)
+  // Strip any image syntax from bot text
   const { cleanText } = extractImageUrls(agentResponse.text)
-  const waMessageId = await sendWhatsAppMessage(parsed.from, cleanText)
 
-  // Send images captured directly from product API results
-  for (const url of agentResponse.imageUrls) {
-    await sendWhatsAppImage(parsed.from, url)
+  let waMessageId: string | null = null
+
+  if (agentResponse.products.length > 0) {
+    // Send intro text first (the bot's opening line before listing products)
+    waMessageId = await sendWhatsAppMessage(parsed.from, cleanText)
+
+    // Send each product individually: image first, then name + price + description
+    for (const product of agentResponse.products as AgentProduct[]) {
+      if (product.imageUrl) await sendWhatsAppImage(parsed.from, product.imageUrl)
+      const productText = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
+      await sendWhatsAppMessage(parsed.from, productText)
+    }
+  } else {
+    // No products — send text normally
+    waMessageId = await sendWhatsAppMessage(parsed.from, cleanText)
   }
+
   await Message.create({
     roomId: room._id,
     direction: 'outbound',

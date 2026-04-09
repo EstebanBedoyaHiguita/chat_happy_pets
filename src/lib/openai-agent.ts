@@ -206,11 +206,19 @@ Si no se mencionó algún dato, omite esa línea. Máximo 200 palabras en españ
   return res.choices[0].message.content ?? ''
 }
 
+export interface AgentProduct {
+  name: string
+  price: number
+  description: string
+  imageUrl: string
+}
+
 export interface AgentResponse {
   text: string
   transfer: boolean
   transferReason?: string
   imageUrls: string[]
+  products: AgentProduct[]
 }
 
 export interface RoomKnownData {
@@ -296,8 +304,9 @@ Si NO hay que transferir, no incluyas ese JSON.`
     tool_choice: 'auto',
   })
 
-  // Collect image URLs directly from product tool results
+  // Collect product data directly from product tool results
   const collectedImageUrls: string[] = []
+  const collectedProducts: AgentProduct[] = []
   const HAPPY_PETS_BASE = process.env.HAPPY_PETS_API_URL ?? ''
 
   // Handle tool calls
@@ -311,17 +320,21 @@ Si NO hay que transferir, no incluyas ese JSON.`
       const args = JSON.parse(toolCall.function.arguments || '{}')
       const result = await executeTool(toolCall.function.name, args, waId)
 
-      // Extract image URLs from product catalog calls
+      // Extract structured product data from catalog calls
       if (toolCall.function.name === 'get_products' || toolCall.function.name === 'get_featured_products') {
         try {
           const products = JSON.parse(result)
           if (Array.isArray(products)) {
-            for (const product of products.slice(0, 2)) {
-              const img = Array.isArray(product.images) ? product.images[0] : null
-              if (img) {
-                const url = img.startsWith('http') ? img : `${HAPPY_PETS_BASE}${img}`
-                collectedImageUrls.push(url)
-              }
+            for (const p of products) {
+              const img = Array.isArray(p.images) ? p.images[0] : null
+              const imageUrl = img ? (img.startsWith('http') ? img : `${HAPPY_PETS_BASE}${img}`) : ''
+              collectedProducts.push({
+                name: p.name ?? '',
+                price: p.price ?? 0,
+                description: p.description ?? '',
+                imageUrl,
+              })
+              if (imageUrl) collectedImageUrls.push(imageUrl)
             }
           }
         } catch { /* ignore parse errors */ }
@@ -371,5 +384,5 @@ Si NO hay que transferir, no incluyas ese JSON.`
     // No transfer JSON found, that's fine
   }
 
-  return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls }
+  return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: collectedProducts }
 }
