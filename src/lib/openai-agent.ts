@@ -318,19 +318,22 @@ Si NO hay que transferir, no incluyas ese JSON.`
       // Extract structured product data from catalog calls
       if (toolCall.function.name === 'get_products' || toolCall.function.name === 'get_featured_products') {
         try {
-          const products = JSON.parse(result)
-          if (Array.isArray(products)) {
-            for (const p of products) {
-              const img = Array.isArray(p.images) ? p.images[0] : null
-              const imageUrl = img ? (img.startsWith('http') ? img : `${HAPPY_PETS_BASE}${img}`) : ''
-              collectedProducts.push({
-                name: p.name ?? '',
-                price: p.price ?? 0,
-                description: p.description ?? '',
-                imageUrl,
-              })
-              if (imageUrl) collectedImageUrls.push(imageUrl)
-            }
+          const raw = JSON.parse(result)
+          // Handle both plain array and wrapped responses {data:[]} or {items:[]}
+          const productList: Record<string, unknown>[] = Array.isArray(raw) ? raw
+            : Array.isArray(raw?.data) ? raw.data
+            : Array.isArray(raw?.items) ? raw.items
+            : []
+          for (const p of productList) {
+            const img = Array.isArray(p.images) ? (p.images as string[])[0] : null
+            const imageUrl = img ? (img.startsWith('http') ? img : `${HAPPY_PETS_BASE}${img}`) : ''
+            collectedProducts.push({
+              name: (p.name as string) ?? '',
+              price: (p.price as number) ?? 0,
+              description: (p.description as string) ?? '',
+              imageUrl,
+            })
+            if (imageUrl) collectedImageUrls.push(imageUrl)
           }
         } catch { /* ignore parse errors */ }
       }
