@@ -168,9 +168,14 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           ? freshProductsRaw
           : Array.isArray(freshProductsRaw?.data) ? freshProductsRaw.data : []
 
-        // Map items using fresh prices from backend
+        // Map items using fresh prices from backend (fuzzy name match)
+        const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
         const items = ((args.items as { productName: string; quantity: number }[]) ?? []).map((item) => {
-          const found = freshList.find((p) => (p.name as string) === item.productName)
+          const search = normalize(item.productName)
+          const found = freshList.find((p) => {
+            const n = normalize(p.name as string)
+            return n === search || n.includes(search) || search.includes(n)
+          })
           const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
           return {
             product: (found?._id as string) ?? '',
@@ -201,7 +206,20 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           status: 'pending',
         }
 
-        result = await createOrder(orderData)
+        const orderResult = await createOrder(orderData)
+        // Return order with calculated prices so bot can confirm correct values
+        result = {
+          ...orderResult,
+          calculatedSubtotal: subtotal,
+          calculatedShipping: shipping,
+          calculatedTotal: total,
+          calculatedItems: items.map(i => ({
+            name: i.name,
+            quantity: i.quantity,
+            unitPrice: i.price,
+            lineTotal: i.price * i.quantity,
+          })),
+        }
         break
       }
       case 'register_customer':
@@ -343,14 +361,24 @@ FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO:
 1. Cuando el cliente quiera hacer un pedido, llama get_cities y muestra las ciudades disponibles.
 2. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona.
 3. Pregunta la dirección exacta de entrega.
-4. Muestra el resumen del pedido:
-   - Productos y cantidades
-   - Subtotal
+4. Cuando tengas productos, ciudad y dirección, pregunta: "¿Confirmamos el pedido?" — NO calcules ni muestres precios todavía, los precios correctos los confirma el sistema.
+5. Cuando el cliente diga que sí, llama create_order INMEDIATAMENTE con todos los datos.
+6. La herramienta retorna los precios reales calculados en calculatedItems, calculatedSubtotal, calculatedShipping y calculatedTotal. USA ESOS VALORES para mostrar el resumen final:
+   - Lista cada producto con: nombre, cantidad, precio unitario y subtotal de esa línea
+   - Subtotal total
    - Envío
    - Total
-   Pregunta: ¿Confirmamos el pedido?
-5. Cuando el cliente confirme, llama create_order INMEDIATAMENTE con todos los datos.
-6. Informa al cliente que su pedido quedó registrado y que pronto lo contactarán.
+   Luego informa que el pedido quedó registrado y envía SIEMPRE el siguiente mensaje de pago (cópialo tal cual):
+
+💳 Información de pago:
+Nuestros domiciliarios NO reciben dinero en efectivo por seguridad. El pedido debe estar cancelado antes de la entrega.
+
+Realiza tu pago por transferencia o consignación a:
+🏦 Bancolombia
+📋 Cuenta de Ahorros: 80498900287
+👤 Esteban Bedoya
+
+Cuando realices el pago, envíanos el comprobante por este mismo chat. ¡Gracias! 🐾
 
 IMPORTANTE: Al final de cada respuesta, si detectas alguna de estas situaciones, debes devolver un JSON en la última línea con el formato: {"transfer":true,"reason":"motivo"}
 Situaciones que requieren transferencia a humano:
