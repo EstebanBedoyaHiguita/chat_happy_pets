@@ -158,11 +158,14 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
+        console.log('[create_order] args recibidos:', JSON.stringify(args))
         // Get shipping cost and fresh product prices from backend
         const [shippingData, freshProductsRaw] = await Promise.all([
           getShippingCost(args.cityId as string),
           getProducts(),
         ])
+        console.log('[create_order] shippingData:', JSON.stringify(shippingData))
+        console.log('[create_order] freshProductsRaw tipo:', typeof freshProductsRaw, Array.isArray(freshProductsRaw) ? 'array' : 'objeto')
         const shipping: number = shippingData?.shippingCost ?? shippingData?.shipping ?? 10000
         const freshList: Record<string, unknown>[] = Array.isArray(freshProductsRaw)
           ? freshProductsRaw
@@ -206,7 +209,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           status: 'pending',
         }
 
+        console.log('[create_order] orderData a enviar:', JSON.stringify(orderData))
         const orderResult = await createOrder(orderData)
+        console.log('[create_order] respuesta backend:', JSON.stringify(orderResult))
         // Return order with calculated prices so bot can confirm correct values
         result = {
           ...orderResult,
