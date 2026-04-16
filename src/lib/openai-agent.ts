@@ -4,7 +4,6 @@ import {
   getFeaturedProducts,
   getCategories,
   getProductDetail,
-  createOrder,
   registerCustomer,
   getCities,
   getShippingCost,
@@ -121,15 +120,23 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'update_customer_info',
-      description: 'LLAMA ESTA FUNCIÓN INMEDIATAMENTE cada vez que el cliente mencione cualquier dato: su nombre, el nombre de su mascota, la edad de la mascota, el peso de la mascota o su dirección. No esperes a tener todos los datos, llámala cada vez que aprendas uno nuevo.',
+      description: 'LLAMA ESTA FUNCIÓN INMEDIATAMENTE cada vez que el cliente mencione cualquier dato: su nombre, el nombre/tipo/edad/peso de cualquiera de sus mascotas, o su dirección. No esperes a tener todos los datos, llámala cada vez que aprendas uno nuevo.',
       parameters: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Nombre real del cliente' },
-          petType: { type: 'string', description: 'Tipo de mascota: Perro o Gato' },
-          petName: { type: 'string', description: 'Nombre de la mascota' },
-          petAge: { type: 'string', description: 'Edad de la mascota (ej: 8 años)' },
-          petWeight: { type: 'string', description: 'Peso de la mascota (ej: 30 kg)' },
+          petType: { type: 'string', description: 'Tipo de mascota 1: Perro o Gato' },
+          petName: { type: 'string', description: 'Nombre de la mascota 1' },
+          petAge: { type: 'string', description: 'Edad de la mascota 1 (ej: 8 años)' },
+          petWeight: { type: 'string', description: 'Peso de la mascota 1 (ej: 30 kg)' },
+          pet2Type: { type: 'string', description: 'Tipo de mascota 2: Perro o Gato' },
+          pet2Name: { type: 'string', description: 'Nombre de la mascota 2' },
+          pet2Age: { type: 'string', description: 'Edad de la mascota 2' },
+          pet2Weight: { type: 'string', description: 'Peso de la mascota 2' },
+          pet3Type: { type: 'string', description: 'Tipo de mascota 3: Perro o Gato' },
+          pet3Name: { type: 'string', description: 'Nombre de la mascota 3' },
+          pet3Age: { type: 'string', description: 'Edad de la mascota 3' },
+          pet3Weight: { type: 'string', description: 'Peso de la mascota 3' },
           address: { type: 'string', description: 'Direccion de entrega' },
         },
       },
@@ -158,7 +165,6 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
-        console.log('[create_order] args recibidos:', JSON.stringify(args))
         const [shippingData, freshProductsRaw] = await Promise.all([
           getShippingCost(args.cityId as string),
           getProducts(),
@@ -175,7 +181,6 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
             const n = normalize(p.name as string)
             return n === search || n.includes(search) || search.includes(n)
           })
-          console.log(`[create_order] matching "${item.productName}" → price:`, found ? (found.price as number) : 'NO MATCH')
           const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
           const price = (found?.price as number) ?? 0
           return {
@@ -195,7 +200,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         await connectDB()
 
         const orderNumber = `WA-${Date.now()}`
-        const botOrder = await BotOrder.create({
+        await BotOrder.create({
           orderNumber,
           waId: waId ?? '',
           customerName: roomData?.name ?? '',
@@ -213,7 +218,6 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           status: 'pending',
         })
 
-        console.log('[create_order] guardado en BotOrder:', botOrder._id)
         result = {
           success: true,
           orderNumber,
@@ -231,12 +235,10 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         if (waId) {
           const { Room } = await import('./models/Room')
           const update: Record<string, string> = {}
-          if (args.name) update.name = args.name as string
-          if (args.petType) update.petType = args.petType as string
-          if (args.petName) update.petName = args.petName as string
-          if (args.petAge) update.petAge = args.petAge as string
-          if (args.petWeight) update.petWeight = args.petWeight as string
-          if (args.address) update.address = args.address as string
+          const fields = ['name','petType','petName','petAge','petWeight','pet2Type','pet2Name','pet2Age','pet2Weight','pet3Type','pet3Name','pet3Age','pet3Weight','address']
+          for (const f of fields) {
+            if (args[f]) update[f] = args[f] as string
+          }
           if (Object.keys(update).length > 0) {
             await Room.updateOne({ waId }, { $set: update })
           }
@@ -314,6 +316,14 @@ export interface RoomKnownData {
   petType?: string
   petAge?: string
   petWeight?: string
+  pet2Name?: string
+  pet2Type?: string
+  pet2Age?: string
+  pet2Weight?: string
+  pet3Name?: string
+  pet3Type?: string
+  pet3Age?: string
+  pet3Weight?: string
   address?: string
 }
 
@@ -334,11 +344,10 @@ export async function runAgent(
 
   const knownLines: string[] = []
   if (roomData.name && roomData.name !== 'Desconocido') knownLines.push(`- Nombre del cliente: ${roomData.name}`)
-  if (roomData.petType) knownLines.push(`- Tipo de mascota: ${roomData.petType}`)
-  if (roomData.petName) knownLines.push(`- Nombre de la mascota: ${roomData.petName}`)
-  if (roomData.petAge) knownLines.push(`- Edad de la mascota: ${roomData.petAge}`)
-  if (roomData.petWeight) knownLines.push(`- Peso de la mascota: ${roomData.petWeight}`)
   if (roomData.address) knownLines.push(`- Dirección de entrega: ${roomData.address}`)
+  if (roomData.petType || roomData.petName) knownLines.push(`- Mascota 1: ${[roomData.petType, roomData.petName, roomData.petAge, roomData.petWeight].filter(Boolean).join(', ')}`)
+  if (roomData.pet2Type || roomData.pet2Name) knownLines.push(`- Mascota 2: ${[roomData.pet2Type, roomData.pet2Name, roomData.pet2Age, roomData.pet2Weight].filter(Boolean).join(', ')}`)
+  if (roomData.pet3Type || roomData.pet3Name) knownLines.push(`- Mascota 3: ${[roomData.pet3Type, roomData.pet3Name, roomData.pet3Age, roomData.pet3Weight].filter(Boolean).join(', ')}`)
 
   const transferInstructions = `
 
@@ -360,10 +369,10 @@ FORMATO DE RESPUESTA — CRÍTICO:
 - Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que en este momento no puedes mostrar el catálogo y pide al cliente que intente en un momento.
 
 FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO:
-1. Cuando el cliente quiera hacer un pedido, llama get_cities y muestra las ciudades disponibles.
-2. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona.
-3. Pregunta la dirección exacta de entrega.
-4. Cuando tengas productos, ciudad y dirección, pregunta: "¿Confirmamos el pedido?" — NO calcules ni muestres precios todavía, los precios correctos los confirma el sistema.
+1. Antes de continuar, verifica los DATOS YA GUARDADOS. Si no tienes el nombre del cliente (o dice "Desconocido"), pídelo y llama update_customer_info. Si no tienes la dirección de entrega, pídela y llama update_customer_info. Solo pide lo que no tengas.
+2. Llama get_cities y muestra las ciudades disponibles.
+3. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona.
+4. Cuando tengas nombre, dirección, productos y ciudad confirmados, pregunta: "¿Confirmamos el pedido?" — NO calcules ni muestres precios todavía, los precios correctos los confirma el sistema.
 5. Cuando el cliente diga que sí, llama create_order INMEDIATAMENTE con todos los datos.
 6. La herramienta retorna el resumen real del pedido. Muéstraselo al cliente exactamente así:
 

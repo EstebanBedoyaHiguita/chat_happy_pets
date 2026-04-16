@@ -9,6 +9,14 @@ export interface RoomDoc extends Document {
   petType: string
   petAge: string
   petWeight: string
+  pet2Name: string
+  pet2Type: string
+  pet2Age: string
+  pet2Weight: string
+  pet3Name: string
+  pet3Type: string
+  pet3Age: string
+  pet3Weight: string
   address: string
   status: ConversationStatus
   assignedTo?: string
@@ -31,6 +39,14 @@ const RoomSchema = new Schema<RoomDoc>(
     petType: { type: String, default: '' },
     petAge: { type: String, default: '' },
     petWeight: { type: String, default: '' },
+    pet2Name: { type: String, default: '' },
+    pet2Type: { type: String, default: '' },
+    pet2Age: { type: String, default: '' },
+    pet2Weight: { type: String, default: '' },
+    pet3Name: { type: String, default: '' },
+    pet3Type: { type: String, default: '' },
+    pet3Age: { type: String, default: '' },
+    pet3Weight: { type: String, default: '' },
     address: { type: String, default: '' },
     status: {
       type: String,

@@ -144,6 +144,14 @@ async function processMessage(parsed: {
     petType: room.petType || undefined,
     petAge: room.petAge || undefined,
     petWeight: room.petWeight || undefined,
+    pet2Name: room.pet2Name || undefined,
+    pet2Type: room.pet2Type || undefined,
+    pet2Age: room.pet2Age || undefined,
+    pet2Weight: room.pet2Weight || undefined,
+    pet3Name: room.pet3Name || undefined,
+    pet3Type: room.pet3Type || undefined,
+    pet3Age: room.pet3Age || undefined,
+    pet3Weight: room.pet3Weight || undefined,
     address: room.address || undefined,
   }
 

@@ -12,6 +12,14 @@ export interface IRoom {
   petType: string
   petAge: string
   petWeight: string
+  pet2Name: string
+  pet2Type: string
+  pet2Age: string
+  pet2Weight: string
+  pet3Name: string
+  pet3Type: string
+  pet3Age: string
+  pet3Weight: string
   address: string
   status: ConversationStatus
   assignedTo?: string
