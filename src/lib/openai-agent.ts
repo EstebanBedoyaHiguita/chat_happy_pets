@@ -137,7 +137,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ]
 
-async function executeTool(name: string, args: Record<string, unknown>, waId?: string, collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}): Promise<string> {
+async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}): Promise<string> {
   console.log('[Tool call]', name, JSON.stringify(args))
   try {
     let result
@@ -159,19 +159,15 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         break
       case 'create_order': {
         console.log('[create_order] args recibidos:', JSON.stringify(args))
-        // Get shipping cost and fresh product prices from backend
         const [shippingData, freshProductsRaw] = await Promise.all([
           getShippingCost(args.cityId as string),
           getProducts(),
         ])
-        console.log('[create_order] shippingData:', JSON.stringify(shippingData))
-        console.log('[create_order] freshProductsRaw tipo:', typeof freshProductsRaw, Array.isArray(freshProductsRaw) ? 'array' : 'objeto')
         const shipping: number = shippingData?.shippingCost ?? shippingData?.shipping ?? 10000
         const freshList: Record<string, unknown>[] = Array.isArray(freshProductsRaw)
           ? freshProductsRaw
           : Array.isArray(freshProductsRaw?.data) ? freshProductsRaw.data : []
 
-        // Map items using fresh prices from backend (fuzzy name match)
         const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
         const items = ((args.items as { productName: string; quantity: number }[]) ?? []).map((item) => {
           const search = normalize(item.productName)
@@ -179,51 +175,52 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
             const n = normalize(p.name as string)
             return n === search || n.includes(search) || search.includes(n)
           })
+          console.log(`[create_order] matching "${item.productName}" → price:`, found ? (found.price as number) : 'NO MATCH')
           const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
+          const price = (found?.price as number) ?? 0
           return {
-            product: (found?._id as string) ?? '',
             name: item.productName,
-            price: (found?.price as number) ?? 0,
+            price,
             quantity: item.quantity,
+            lineTotal: price * item.quantity,
             image: img,
           }
         })
 
-        const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0)
+        const subtotal = items.reduce((sum, i) => sum + i.lineTotal, 0)
         const total = subtotal + shipping
 
-        const orderData = {
+        const { BotOrder } = await import('./models/BotOrder')
+        const { connectDB } = await import('./mongodb')
+        await connectDB()
+
+        const orderNumber = `WA-${Date.now()}`
+        const botOrder = await BotOrder.create({
+          orderNumber,
+          waId: waId ?? '',
+          customerName: roomData?.name ?? '',
+          customerPhone: waId ?? '',
           items,
           subtotal,
           shipping,
           total,
           shippingAddress: {
-            name: roomData?.name ?? '',
-            phone: waId ?? '',
-            email: '',
             address: args.address as string,
             city: args.cityName as string,
             department: args.department as string,
             notes: (args.notes as string) ?? '',
           },
           status: 'pending',
-        }
+        })
 
-        console.log('[create_order] orderData a enviar:', JSON.stringify(orderData))
-        const orderResult = await createOrder(orderData)
-        console.log('[create_order] respuesta backend:', JSON.stringify(orderResult))
-        // Return order with calculated prices so bot can confirm correct values
+        console.log('[create_order] guardado en BotOrder:', botOrder._id)
         result = {
-          ...orderResult,
-          calculatedSubtotal: subtotal,
-          calculatedShipping: shipping,
-          calculatedTotal: total,
-          calculatedItems: items.map(i => ({
-            name: i.name,
-            quantity: i.quantity,
-            unitPrice: i.price,
-            lineTotal: i.price * i.quantity,
-          })),
+          success: true,
+          orderNumber,
+          subtotal,
+          shipping,
+          total,
+          items: items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price, lineTotal: i.lineTotal })),
         }
         break
       }
@@ -368,12 +365,16 @@ FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO:
 3. Pregunta la dirección exacta de entrega.
 4. Cuando tengas productos, ciudad y dirección, pregunta: "¿Confirmamos el pedido?" — NO calcules ni muestres precios todavía, los precios correctos los confirma el sistema.
 5. Cuando el cliente diga que sí, llama create_order INMEDIATAMENTE con todos los datos.
-6. La herramienta retorna los precios reales calculados en calculatedItems, calculatedSubtotal, calculatedShipping y calculatedTotal. USA ESOS VALORES para mostrar el resumen final:
-   - Lista cada producto con: nombre, cantidad, precio unitario y subtotal de esa línea
-   - Subtotal total
-   - Envío
-   - Total
-   Luego informa que el pedido quedó registrado y envía SIEMPRE el siguiente mensaje de pago (cópialo tal cual):
+6. La herramienta retorna el resumen real del pedido. Muéstraselo al cliente exactamente así:
+
+✅ Pedido registrado #[orderNumber]
+
+[Por cada item en items: "- [quantity] x [name]: $[lineTotal] COP"]
+Subtotal: $[subtotal] COP
+Envío: $[shipping] COP
+Total: $[total] COP
+
+Luego envía SIEMPRE el siguiente mensaje de pago (cópialo tal cual):
 
 💳 Información de pago:
 Nuestros domiciliarios NO reciben dinero en efectivo por seguridad. El pedido debe estar cancelado antes de la entrega.
