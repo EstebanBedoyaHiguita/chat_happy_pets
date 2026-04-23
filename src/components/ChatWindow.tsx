@@ -16,6 +16,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [takingOver, setTakingOver] = useState(false)
   const [reopening, setReopening] = useState(false)
   const [showContactCard, setShowContactCard] = useState(false)
+  const [expandedPets, setExpandedPets] = useState<Record<number, boolean>>({ 1: true, 2: false, 3: false })
   const [showCloseModal, setShowCloseModal] = useState(false)
   const [closeReasons, setCloseReasons] = useState<ICloseReason[]>([])
   const [selectedReasonId, setSelectedReasonId] = useState('')
@@ -260,41 +261,74 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
 
       {/* ── Contact card panel ── */}
       {showContactCard && (
-        <div className="w-72 flex-shrink-0 border-l border-gray-800 bg-gray-900 flex flex-col p-5 gap-4 overflow-y-auto">
-          <div className="flex items-center justify-between">
+        <div className="w-72 flex-shrink-0 border-l border-gray-800 bg-gray-900 flex flex-col overflow-y-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
             <h3 className="text-white font-semibold text-sm">Datos del contacto</h3>
             <button onClick={() => setShowContactCard(false)} className="text-gray-500 hover:text-white text-lg transition-colors">×</button>
           </div>
-          <div className="w-14 h-14 rounded-full bg-gray-700 flex items-center justify-center text-white text-2xl font-bold mx-auto">
-            {conversation.name.charAt(0).toUpperCase()}
+
+          {/* Avatar + name */}
+          <div className="flex flex-col items-center gap-2 py-5 border-b border-gray-800">
+            <div className="w-14 h-14 rounded-full bg-gray-700 flex items-center justify-center text-white text-2xl font-bold">
+              {conversation.name.charAt(0).toUpperCase()}
+            </div>
+            <p className="text-white font-medium text-sm">{conversation.name}</p>
+            <p className="text-gray-500 text-xs">{conversation.phone}</p>
           </div>
-          <div className="flex flex-col gap-3">
+
+          <div className="flex flex-col gap-0 px-4 py-4">
+            {/* Basic info */}
             {[
-              { label: 'Nombre', value: conversation.name },
-              { label: 'Teléfono', value: conversation.phone },
-              { label: 'Mascota 1 - Tipo', value: conversation.petType },
-              { label: 'Mascota 1 - Nombre', value: conversation.petName },
-              { label: 'Mascota 1 - Edad', value: conversation.petAge },
-              { label: 'Mascota 1 - Peso', value: conversation.petWeight },
-              { label: 'Mascota 2 - Tipo', value: conversation.pet2Type },
-              { label: 'Mascota 2 - Nombre', value: conversation.pet2Name },
-              { label: 'Mascota 2 - Edad', value: conversation.pet2Age },
-              { label: 'Mascota 2 - Peso', value: conversation.pet2Weight },
-              { label: 'Mascota 3 - Tipo', value: conversation.pet3Type },
-              { label: 'Mascota 3 - Nombre', value: conversation.pet3Name },
-              { label: 'Mascota 3 - Edad', value: conversation.pet3Age },
-              { label: 'Mascota 3 - Peso', value: conversation.pet3Weight },
               { label: 'Dirección', value: conversation.address },
               { label: 'Estado', value: conversation.status },
               ...(conversation.assignedTo ? [{ label: 'Asignado a', value: conversation.assignedTo }] : []),
               ...(conversation.closeReasonName ? [{ label: 'Motivo de cierre', value: conversation.closeReasonName }] : []),
-              ...(conversation.closedBy ? [{ label: 'Cerrado por', value: conversation.closedBy }] : []),
             ].map(({ label, value }) => (
-              <div key={label}>
+              <div key={label} className="mb-3">
                 <p className="text-gray-500 text-xs mb-0.5">{label}</p>
                 <p className="text-white text-sm">{value || '—'}</p>
               </div>
             ))}
+
+            {/* Pet sections */}
+            {[
+              { n: 1, type: conversation.petType, name: conversation.petName, age: conversation.petAge, weight: conversation.petWeight },
+              { n: 2, type: conversation.pet2Type, name: conversation.pet2Name, age: conversation.pet2Age, weight: conversation.pet2Weight },
+              { n: 3, type: conversation.pet3Type, name: conversation.pet3Name, age: conversation.pet3Age, weight: conversation.pet3Weight },
+            ].map(({ n, type, name, age, weight }) => {
+              const hasData = type || name || age || weight
+              const isOpen = expandedPets[n]
+              return (
+                <div key={n} className="mt-2 rounded-xl border border-gray-700 overflow-hidden">
+                  <button
+                    onClick={() => setExpandedPets(p => ({ ...p, [n]: !p[n] }))}
+                    className="w-full flex items-center justify-between px-3 py-2 bg-gray-800 hover:bg-gray-750 transition-colors"
+                  >
+                    <span className="text-xs font-medium text-gray-300 flex items-center gap-2">
+                      🐾 Mascota {n}
+                      {hasData && <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />}
+                    </span>
+                    <span className="text-gray-500 text-xs">{isOpen ? '▲' : '▼'}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="px-3 py-2.5 flex flex-col gap-2 bg-gray-900">
+                      {[
+                        { label: 'Nombre', value: name },
+                        { label: 'Tipo', value: type },
+                        { label: 'Edad', value: age },
+                        { label: 'Peso', value: weight },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="flex justify-between items-center">
+                          <span className="text-gray-500 text-xs">{label}</span>
+                          <span className="text-white text-xs">{value || '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

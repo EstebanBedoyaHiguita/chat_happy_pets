@@ -218,6 +218,48 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           status: 'pending',
         })
 
+        // Map items to sheet columns by product name
+        const sheetNorm = (s: string) => s.toLowerCase()
+        const qty = (keyword: string) => {
+          const item = items.find(i => sheetNorm(i.name).includes(keyword))
+          return item ? item.quantity : ''
+        }
+
+        // Snack categories — join names+quantities for column U
+        const snackCategories = ['deshidratado', 'snack']
+        const snackItems = items.filter(i =>
+          snackCategories.some(cat => sheetNorm(i.name).includes(cat))
+        )
+        const snacksText = snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - ')
+
+        const sheetPayload = {
+          fecha: new Date().toLocaleString('es-CO'),
+          celular: waId ?? '',
+          vend: 'Bot',
+          nombreCliente: roomData?.name ?? '',
+          pollo:    qty('pollo'),
+          fruta:    qty('fruta'),
+          cordero:  qty('cordero'),
+          res:      qty('res'),
+          pez:      qty('pez') || qty('pescado'),
+          gPollo:   qty('gato pollo') || qty('g.pll'),
+          gTernera: qty('gato ternera') || qty('g.ter') || qty('ternera'),
+          salmon:   qty('salmon') || qty('salmón'),
+          conejo:   qty('conejo'),
+          snacks:   snacksText,
+          observaciones: (args.notes as string) ?? '',
+          orderNumber,
+        }
+
+        const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
+        if (webhookUrl) {
+          fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sheetPayload),
+          }).catch(err => console.error('[Sheets webhook error]', err))
+        }
+
         result = {
           success: true,
           orderNumber,
