@@ -165,14 +165,18 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
-        const [shippingData, freshProductsRaw] = await Promise.all([
+        const [shippingData, freshProductsRaw] = await Promise.allSettled([
           getShippingCost(args.cityId as string),
           getProducts(),
         ])
-        const shipping: number = shippingData?.shippingCost ?? shippingData?.shipping ?? 10000
-        const freshList: Record<string, unknown>[] = Array.isArray(freshProductsRaw)
-          ? freshProductsRaw
-          : Array.isArray(freshProductsRaw?.data) ? freshProductsRaw.data : []
+        const shippingResult = shippingData.status === 'fulfilled' ? shippingData.value : null
+        const productsResult = freshProductsRaw.status === 'fulfilled' ? freshProductsRaw.value : null
+        console.log('[create_order] shippingData:', JSON.stringify(shippingResult))
+        console.log('[create_order] productsResult tipo:', typeof productsResult, Array.isArray(productsResult) ? 'array' : 'objeto')
+        const shipping: number = shippingResult?.shippingCost ?? shippingResult?.shipping ?? 10000
+        const freshList: Record<string, unknown>[] = Array.isArray(productsResult)
+          ? productsResult
+          : Array.isArray(productsResult?.data) ? productsResult.data : []
 
         const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
         const items = ((args.items as { productName: string; quantity: number }[]) ?? []).map((item) => {
