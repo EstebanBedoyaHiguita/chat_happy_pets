@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@vercel/functions": "^3.4.4",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.4",
     "next": "16.1.6",

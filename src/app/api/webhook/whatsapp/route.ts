@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const parsed = parseWebhookPayload(body)
   if (!parsed) return NextResponse.json({ status: 'ignored' }, { status: 200 })
-  processMessage(parsed).catch(console.error)
+  waitUntil(processMessage(parsed).catch(console.error))
   return NextResponse.json({ status: 'ok' }, { status: 200 })
 }
 

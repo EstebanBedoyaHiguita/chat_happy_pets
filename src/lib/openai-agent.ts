@@ -203,11 +203,20 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           : Array.isArray(productsResult?.data) ? productsResult.data : []
 
         const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
+        // Palabras vacías que no aportan al match
+        const STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'para', 'una', 'uno', 'y', 'a'])
+        const keyWords = (s: string) => normalize(s).split(' ').filter(w => w.length > 2 && !STOPWORDS.has(w))
+
         const items = ((args.items as { productName: string; quantity: number }[]) ?? []).map((item) => {
           const search = normalize(item.productName)
+          const searchKeys = keyWords(item.productName)
           const found = freshList.find((p) => {
             const n = normalize(p.name as string)
-            return n === search || n.includes(search) || search.includes(n)
+            if (n === search || n.includes(search) || search.includes(n)) return true
+            // Coincidencia por palabras clave: al menos el 60% de las palabras del buscador aparecen en el nombre del producto
+            const productKeys = keyWords(p.name as string)
+            const matches = searchKeys.filter(w => productKeys.some(pw => pw.includes(w) || w.includes(pw)))
+            return searchKeys.length > 0 && matches.length >= Math.ceil(searchKeys.length * 0.6)
           })
           const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
           const price = (found?.price as number) ?? 0
