@@ -165,15 +165,39 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
-        const [shippingData, freshProductsRaw] = await Promise.allSettled([
-          getShippingCost(args.cityId as string),
+        const [citiesRaw, freshProductsRaw] = await Promise.allSettled([
+          getCities(),
           getProducts(),
         ])
-        const shippingResult = shippingData.status === 'fulfilled' ? shippingData.value : null
+
+        // Match city by name (fuzzy) to get the real cityId from the database
+        const citiesList: Record<string, unknown>[] = citiesRaw.status === 'fulfilled'
+          ? (Array.isArray(citiesRaw.value) ? citiesRaw.value : citiesRaw.value?.data ?? [])
+          : []
+        const cityNameArg = (args.cityName as string) ?? ''
+        const normCity = (s: string) => s.toLowerCase().trim()
+        const matchedCity = citiesList.find(c =>
+          (c._id as string) === (args.cityId as string) ||
+          normCity(c.name as string) === normCity(cityNameArg) ||
+          normCity(c.name as string).includes(normCity(cityNameArg)) ||
+          normCity(cityNameArg).includes(normCity(c.name as string))
+        )
+
+        if (!matchedCity && citiesList.length > 0) {
+          result = { status: 'error', message: `La ciudad "${cityNameArg}" no está disponible. Ciudades disponibles: ${citiesList.map(c => c.name).join(', ')}.` }
+          break
+        }
+
+        const realCityId = (matchedCity?._id ?? args.cityId) as string
+        let shipping = 10000
+        try {
+          const shippingRaw = await getShippingCost(realCityId)
+          shipping = typeof shippingRaw === 'number' ? shippingRaw : (shippingRaw?.shippingCost ?? shippingRaw?.shipping ?? 10000)
+        } catch (e) {
+          console.error('[create_order] getShippingCost error:', e)
+        }
+
         const productsResult = freshProductsRaw.status === 'fulfilled' ? freshProductsRaw.value : null
-        console.log('[create_order] shippingData:', JSON.stringify(shippingResult))
-        console.log('[create_order] productsResult tipo:', typeof productsResult, Array.isArray(productsResult) ? 'array' : 'objeto')
-        const shipping: number = shippingResult?.shippingCost ?? shippingResult?.shipping ?? 10000
         const freshList: Record<string, unknown>[] = Array.isArray(productsResult)
           ? productsResult
           : Array.isArray(productsResult?.data) ? productsResult.data : []
