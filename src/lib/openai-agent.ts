@@ -213,20 +213,22 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           const searchKeys = keyWords(item.productName)
           // 1. Match by _id (most reliable)
           let found = item.productId ? freshList.find((p) => String(p._id) === item.productId) : undefined
-          // 2. Fallback: exact/substring name match
+          // 2. Fallback: exact name match only (no substring — "Pollo" ⊂ "Pollo Frutas" causes wrong match)
           if (!found) {
-            found = freshList.find((p) => {
-              const n = normalize(p.name as string)
-              return n === search || n.includes(search) || search.includes(n)
-            })
+            found = freshList.find((p) => normalize(p.name as string) === search)
           }
-          // 3. Fallback: keyword match (≥60%)
+          // 3. Fallback: best keyword match (highest overlap ratio, not just first ≥60%)
           if (!found) {
-            found = freshList.find((p) => {
+            let bestScore = 0
+            for (const p of freshList) {
               const productKeys = keyWords(p.name as string)
               const matches = searchKeys.filter(w => productKeys.some(pw => pw.includes(w) || w.includes(pw)))
-              return searchKeys.length > 0 && matches.length >= Math.ceil(searchKeys.length * 0.6)
-            })
+              const score = searchKeys.length > 0 ? matches.length / searchKeys.length : 0
+              if (score > bestScore && score >= 0.6) {
+                bestScore = score
+                found = p
+              }
+            }
           }
           const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
           const rawPrice = found?.price
@@ -274,10 +276,10 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           return item ? item.quantity : ''
         }
 
-        // Snack categories — join names+quantities for column U
-        const snackCategories = ['deshidratado', 'snack']
+        // Items que NO van en columnas BARF estándar → van al campo snacks (col 21)
+        const barfKeywords = ['pollo', 'fruta', 'cordero', 'res', 'pez', 'pescado', 'gato', 'salmon', 'salmón', 'conejo']
         const snackItems = items.filter(i =>
-          snackCategories.some(cat => sheetNorm(i.name).includes(cat))
+          !barfKeywords.some(kw => sheetNorm(i.name).includes(kw))
         )
         const snacksText = snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - ')
 
