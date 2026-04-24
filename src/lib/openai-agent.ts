@@ -290,25 +290,20 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 
         const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
         if (webhookUrl) {
-          const ctrl = new AbortController()
-          const timer = setTimeout(() => ctrl.abort(), 12000)
-          try {
-            console.log('[Sheets webhook] enviando POST:', JSON.stringify(sheetPayload))
-            const sheetsRes = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain' },
-              body: JSON.stringify(sheetPayload),
-              redirect: 'manual',
-              signal: ctrl.signal,
+          console.log('[Sheets webhook] enviando POST:', JSON.stringify(sheetPayload))
+          fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(sheetPayload),
+          })
+            .then(async (sheetsRes) => {
+              const sheetsText = await sheetsRes.text().catch(() => '')
+              console.log('[Sheets webhook] status:', sheetsRes.status, 'body:', sheetsText.substring(0, 200))
             })
-            clearTimeout(timer)
-            const sheetsText = await sheetsRes.text().catch(() => '')
-            console.log('[Sheets webhook] status:', sheetsRes.status, 'body:', sheetsText.substring(0, 200))
-          } catch (err: unknown) {
-            clearTimeout(timer)
-            const msg = err instanceof Error ? err.message : String(err)
-            console.error('[Sheets webhook error]', msg)
-          }
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err)
+              console.error('[Sheets webhook error]', msg)
+            })
         } else {
           console.warn('[Sheets webhook] GOOGLE_SHEETS_WEBHOOK no configurado')
         }
@@ -494,11 +489,9 @@ FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
    - NUNCA mezcles productos BARF con snacks en el mismo mensaje.
 3. Verifica los DATOS YA GUARDADOS. Si no tienes el nombre del cliente (o dice "Desconocido"), pídelo y llama update_customer_info. Si no tienes la dirección de entrega, pídela y llama update_customer_info. Solo pide lo que no tengas.
 4. Llama get_cities y muestra las ciudades disponibles.
-5. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona.
-6. Antes de confirmar, muestra al cliente un resumen de lo que va a pedir y pregunta explícitamente: "¿Confirmas la dirección de entrega: [dirección]?" — espera que el cliente diga que sí. Si dice que no o quiere cambiarla, actualízala con update_customer_info antes de continuar.
-7. Con la dirección confirmada, pregunta: "¿Confirmamos el pedido?" — NO escribas precios ni totales todavía. El sistema los calcula.
-8. Cuando el cliente diga que sí: LLAMA create_order AHORA. NO escribas nada antes de llamarla. NO inventes precios. NO copies ninguna plantilla. LLAMA LA HERRAMIENTA PRIMERO.
-9. SOLO DESPUÉS de que create_order retorne un resultado, escribe el resumen usando los valores EXACTOS que retornó la herramienta:
+5. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona. Luego pregunta: "¿Confirmamos el pedido con entrega a [dirección]?" — espera que el cliente confirme.
+6. Cuando el cliente diga que sí confirma: LLAMA create_order INMEDIATAMENTE. NO escribas nada antes de llamarla. NO inventes precios. NO copies ninguna plantilla. LLAMA LA HERRAMIENTA PRIMERO.
+7. SOLO DESPUÉS de que create_order retorne un resultado, escribe el resumen usando los valores EXACTOS que retornó la herramienta:
    - Usa el orderNumber real retornado — NUNCA escribas "[orderNumber]" literal
    - Usa el lineTotal, subtotal, shipping, total reales retornados — NUNCA los calcules tú
    - Si no llamaste create_order, NO escribas ningún resumen de pedido
