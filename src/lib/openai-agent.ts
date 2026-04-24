@@ -281,11 +281,13 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 
         const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
         if (webhookUrl) {
-          const params = new URLSearchParams()
-          Object.entries(sheetPayload).forEach(([k, v]) => params.set(k, String(v ?? '')))
-          const fullUrl = `${webhookUrl}?${params.toString()}`
-          console.log('[Sheets webhook URL]', fullUrl.substring(0, 300))
-          fetch(fullUrl, { redirect: 'follow' })
+          console.log('[Sheets webhook] enviando POST:', JSON.stringify(sheetPayload))
+          fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(sheetPayload),
+            redirect: 'follow',
+          })
             .then(res => res.text().then(t => console.log('[Sheets webhook]', res.status, t)))
             .catch(err => console.error('[Sheets webhook error]', err))
         } else {
@@ -456,25 +458,24 @@ FORMATO DE RESPUESTA — CRÍTICO:
 - NUNCA digas que hay problemas técnicos ni que no puedes obtener precios.
 - Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que el catálogo no está disponible en este momento.
 
-UPSELL DE SNACKS Y PREMIOS:
-Después de que el cliente tenga claro qué dietas BARF va a pedir y ANTES de pasar al proceso de pedido, ofrece siempre los complementos así:
+FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
+1. ⚠️ UPSELL OBLIGATORIO — NUNCA OMITAS ESTE PASO: Antes de continuar con el pedido, ofrece snacks y premios. Envía este mensaje tal cual:
 "¿Te gustaría agregar algún premio o snack para complementar la dieta de [nombre mascota]? 🎁 Tenemos tres opciones:
 🥩 Deshidratados
 💧 Snacks Húmedos
 🦴 Snacks
 ¿Te interesa conocer alguno?"
-- Si el cliente elige una categoría, llama get_products con esa categoría y muestra máximo 2 productos.
-- Si el cliente elige más de una, muestra cada categoría por separado en mensajes distintos.
-- Si el cliente no quiere snacks, continúa con el flujo de pedido normalmente.
-- NUNCA mezcles productos BARF con snacks en el mismo mensaje.
-
-FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO:
-1. Antes de continuar, verifica los DATOS YA GUARDADOS. Si no tienes el nombre del cliente (o dice "Desconocido"), pídelo y llama update_customer_info. Si no tienes la dirección de entrega, pídela y llama update_customer_info. Solo pide lo que no tengas.
-2. Llama get_cities y muestra las ciudades disponibles.
-3. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona.
-4. Cuando tengas nombre, dirección, productos y ciudad confirmados, pregunta: "¿Confirmamos el pedido?" — NO calcules ni muestres precios todavía, los precios correctos los confirma el sistema.
-5. Cuando el cliente diga que sí, llama create_order INMEDIATAMENTE con todos los datos.
-6. La herramienta retorna el resumen real del pedido. Muéstraselo al cliente exactamente así:
+   - Si el cliente elige una categoría, llama get_products con esa categoría y muestra máximo 2 productos de esa categoría SOLAMENTE.
+   - Si el cliente elige más de una, muestra cada categoría por separado.
+   - Si el cliente dice que no quiere snacks (o "no", "así está bien", "solo eso"), pasa al paso 2.
+   - NUNCA mezcles productos BARF con snacks en el mismo mensaje.
+   - NUNCA saltes este paso aunque el cliente haya dicho "quiero pedir" o "sí confirmo" — primero el upsell.
+2. Verifica los DATOS YA GUARDADOS. Si no tienes el nombre del cliente (o dice "Desconocido"), pídelo y llama update_customer_info. Si no tienes la dirección de entrega, pídela y llama update_customer_info. Solo pide lo que no tengas.
+3. Llama get_cities y muestra las ciudades disponibles.
+4. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona.
+5. Cuando tengas nombre, dirección, productos y ciudad confirmados, pregunta: "¿Confirmamos el pedido?" — NO calcules ni muestres precios todavía, los precios correctos los confirma el sistema.
+6. Cuando el cliente diga que sí, llama create_order INMEDIATAMENTE con todos los datos.
+7. La herramienta retorna el resumen real del pedido. Muéstraselo al cliente exactamente así:
 
 ✅ Pedido registrado #[orderNumber]
 
