@@ -285,7 +285,12 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(sheetPayload),
-          }).catch(err => console.error('[Sheets webhook error]', err))
+            redirect: 'follow',
+          })
+            .then(res => res.text().then(t => console.log('[Sheets webhook]', res.status, t)))
+            .catch(err => console.error('[Sheets webhook error]', err))
+        } else {
+          console.warn('[Sheets webhook] GOOGLE_SHEETS_WEBHOOK no configurado')
         }
 
         result = {
