@@ -24,7 +24,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'get_products',
-      description: 'Obtiene el catálogo completo de productos de Happy Pets. Cada producto incluye: _id, name, description, price (en pesos colombianos COP), sku, stock, available, images (array de URLs de Cloudinary).',
+      description: 'Obtiene el catálogo COMPLETO de Happy Pets. Incluye TODOS los productos: Dietas BARF (Pollo, Pollo Frutas, Res, Cordero, Pescado, Salmón, Conejo), Snacks Humedos (Albóndigas), Deshidratados, Snacks. IMPORTANTE: cuando el cliente pregunte por un sabor específico (ej: "conejo"), busca en la lista completa ese producto y muestra ÚNICAMENTE ese producto en tu respuesta. NUNCA muestres otros sabores si el cliente pidió uno específico. SIEMPRE llama esta función antes de decir que un producto no existe.',
       parameters: {
         type: 'object',
         properties: {},
@@ -245,7 +245,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           },
           status: 'pending',
         })
-
+        
         // Map items to sheet columns by product name
         const sheetNorm = (s: string) => s.toLowerCase()
         const qty = (keyword: string) => {
@@ -281,12 +281,11 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 
         const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
         if (webhookUrl) {
-          fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sheetPayload),
-            redirect: 'follow',
-          })
+          const params = new URLSearchParams()
+          Object.entries(sheetPayload).forEach(([k, v]) => params.set(k, String(v ?? '')))
+          const fullUrl = `${webhookUrl}?${params.toString()}`
+          console.log('[Sheets webhook URL]', fullUrl.substring(0, 300))
+          fetch(fullUrl, { redirect: 'follow' })
             .then(res => res.text().then(t => console.log('[Sheets webhook]', res.status, t)))
             .catch(err => console.error('[Sheets webhook error]', err))
         } else {
@@ -588,6 +587,14 @@ Si NO hay que transferir, no incluyas ese JSON.`
 
   const fullText = response.choices[0].message.content ?? ''
 
+  // Only send product cards for products the bot explicitly named in its response.
+  // Without this, all 20 catalog items fill collectedProducts and the webhook sends
+  // whichever 2 happen to be first — not the ones the bot actually recommended.
+  const textLower = fullText.toLowerCase()
+  const mentionedProducts = collectedProducts.filter(p =>
+    textLower.includes(p.name.toLowerCase())
+  )
+
   // Parse transfer signal from last line
   const lines = fullText.split('\n')
   const lastLine = lines[lines.length - 1].trim()
@@ -614,5 +621,5 @@ Si NO hay que transferir, no incluyas ese JSON.`
     // No transfer JSON found, that's fine
   }
 
-  return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: collectedProducts }
+  return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: mentionedProducts }
 }
