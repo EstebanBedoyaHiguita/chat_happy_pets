@@ -73,7 +73,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'create_order',
-      description: 'Crea un pedido confirmado. Llama esta función SOLO cuando el cliente haya confirmado explícitamente los productos, cantidad, ciudad y dirección.',
+      description: 'OBLIGATORIO: Registra el pedido en el sistema. DEBES llamar esta función cuando el cliente confirme el pedido. NUNCA escribas el resumen del pedido sin haber llamado esta función primero. Esta función retorna orderNumber, subtotal, shipping y total reales — usa SOLO esos valores en tu respuesta.',
       parameters: {
         type: 'object',
         properties: {
@@ -621,7 +621,19 @@ Si NO hay que transferir, no incluyas ese JSON.`
     })
   }
 
-  const fullText = response.choices[0].message.content ?? ''
+  let fullText = response.choices[0].message.content ?? ''
+
+  // Si el bot escribió el template literal sin llamar create_order, borra esa parte
+  // para evitar mostrar [orderNumber] al cliente
+  if (!orderCreated && fullText.includes('[orderNumber]')) {
+    console.error('[AGENT] Bot escribió template de orden sin llamar create_order — se elimina del texto')
+    fullText = fullText
+      .replace(/✅ Pedido registrado #\[orderNumber\][\s\S]*?(?=💳|$)/u, '')
+      .trim()
+    if (!fullText) {
+      fullText = 'Hubo un problema al registrar el pedido. Por favor intenta de nuevo confirmando los productos, ciudad y dirección.'
+    }
+  }
 
   // Only send product cards for products the bot explicitly named in its response.
   // Without this, all 20 catalog items fill collectedProducts and the webhook sends
