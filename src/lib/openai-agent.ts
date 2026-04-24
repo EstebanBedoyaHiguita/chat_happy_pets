@@ -281,12 +281,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 
         const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
         if (webhookUrl) {
-          fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sheetPayload),
-            redirect: 'follow',
-          })
+          const params = new URLSearchParams()
+          Object.entries(sheetPayload).forEach(([k, v]) => params.set(k, String(v ?? '')))
+          fetch(`${webhookUrl}?${params.toString()}`, { redirect: 'follow' })
             .then(res => res.text().then(t => console.log('[Sheets webhook]', res.status, t)))
             .catch(err => console.error('[Sheets webhook error]', err))
         } else {
