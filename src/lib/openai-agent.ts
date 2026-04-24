@@ -73,7 +73,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'create_order',
-      description: 'OBLIGATORIO: Registra el pedido en el sistema. DEBES llamar esta función cuando el cliente confirme el pedido. NUNCA escribas el resumen del pedido sin haber llamado esta función primero. Esta función retorna orderNumber, subtotal, shipping y total reales — usa SOLO esos valores en tu respuesta.',
+      description: 'OBLIGATORIO: Registra el pedido en el sistema. DEBES llamar esta función cuando el cliente confirme el pedido. NUNCA escribas el resumen del pedido sin haber llamado esta función primero. Para cada producto en items, DEBES pasar el productId (_id del producto que obtuviste de get_products) — esto garantiza el precio correcto. Esta función retorna orderNumber, subtotal, shipping y total reales — usa SOLO esos valores en tu respuesta.',
       parameters: {
         type: 'object',
         properties: {
@@ -83,10 +83,11 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
             items: {
               type: 'object',
               properties: {
+                productId: { type: 'string', description: '_id del producto obtenido de get_products. OBLIGATORIO para obtener el precio correcto.' },
                 productName: { type: 'string', description: 'Nombre exacto del producto como aparece en el catálogo' },
                 quantity: { type: 'number', description: 'Cantidad de paquetes' },
               },
-              required: ['productName', 'quantity'],
+              required: ['productId', 'productName', 'quantity'],
             },
           },
           cityId: { type: 'string', description: '_id de la ciudad elegida por el cliente' },
@@ -207,21 +208,30 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         const STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'para', 'una', 'uno', 'y', 'a'])
         const keyWords = (s: string) => normalize(s).split(' ').filter(w => w.length > 2 && !STOPWORDS.has(w))
 
-        const items = ((args.items as { productName: string; quantity: number }[]) ?? []).map((item) => {
+        const items = ((args.items as { productId?: string; productName: string; quantity: number }[]) ?? []).map((item) => {
           const search = normalize(item.productName)
           const searchKeys = keyWords(item.productName)
-          const found = freshList.find((p) => {
-            const n = normalize(p.name as string)
-            if (n === search || n.includes(search) || search.includes(n)) return true
-            // Coincidencia por palabras clave: al menos el 60% de las palabras del buscador aparecen en el nombre del producto
-            const productKeys = keyWords(p.name as string)
-            const matches = searchKeys.filter(w => productKeys.some(pw => pw.includes(w) || w.includes(pw)))
-            return searchKeys.length > 0 && matches.length >= Math.ceil(searchKeys.length * 0.6)
-          })
+          // 1. Match by _id (most reliable)
+          let found = item.productId ? freshList.find((p) => String(p._id) === item.productId) : undefined
+          // 2. Fallback: exact/substring name match
+          if (!found) {
+            found = freshList.find((p) => {
+              const n = normalize(p.name as string)
+              return n === search || n.includes(search) || search.includes(n)
+            })
+          }
+          // 3. Fallback: keyword match (≥60%)
+          if (!found) {
+            found = freshList.find((p) => {
+              const productKeys = keyWords(p.name as string)
+              const matches = searchKeys.filter(w => productKeys.some(pw => pw.includes(w) || w.includes(pw)))
+              return searchKeys.length > 0 && matches.length >= Math.ceil(searchKeys.length * 0.6)
+            })
+          }
           const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
           const rawPrice = found?.price
           const price = typeof rawPrice === 'number' ? rawPrice : typeof rawPrice === 'string' ? parseFloat(rawPrice) || 0 : 0
-          console.log(`[create_order] item="${item.productName}" → matched="${found?.name ?? 'NO MATCH'}" price=${price}`)
+          console.log(`[create_order] item="${item.productName}" id=${item.productId} → matched="${found?.name ?? 'NO MATCH'}" price=${price}`)
           return {
             name: item.productName,
             price,
