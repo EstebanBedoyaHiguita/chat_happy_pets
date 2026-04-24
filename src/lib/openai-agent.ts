@@ -219,7 +219,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
             return searchKeys.length > 0 && matches.length >= Math.ceil(searchKeys.length * 0.6)
           })
           const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
-          const price = (found?.price as number) ?? 0
+          const rawPrice = found?.price
+          const price = typeof rawPrice === 'number' ? rawPrice : typeof rawPrice === 'string' ? parseFloat(rawPrice) || 0 : 0
+          console.log(`[create_order] item="${item.productName}" → matched="${found?.name ?? 'NO MATCH'}" price=${price}`)
           return {
             name: item.productName,
             price,
@@ -478,15 +480,16 @@ Para clientes recurrentes: aunque ya hayan comprado antes, SIEMPRE pregunta prim
 
 FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
 1. Si el cliente NO ha elegido productos BARF todavía (dijo "quiero hacer un pedido", "comida para X" o algo vago), pregúntale: "¿Ya sabes qué vas a pedir o quieres que te muestre las opciones de dieta BARF?" — espera su respuesta. NO llames get_products aquí. NO ofrezcas snacks todavía.
-2. ⚠️ UPSELL OBLIGATORIO — solo cuando el cliente YA ELIGIÓ sus dietas BARF: Ofrece snacks y premios así:
-"¿Te gustaría agregar algún premio o snack para complementar la dieta de [nombre mascota]? 🎁 Tenemos tres opciones:
+2. ⚠️ UPSELL DE SNACKS — OBLIGATORIO, NO LO SALTES: Tan pronto el cliente haya elegido sus productos BARF (nombró uno o más sabores), ANTES de preguntar dirección o ciudad, SIEMPRE ofrece snacks con este mensaje exacto:
+"¿Le gustaría agregar algún snack o premio para [nombre mascota]? 🎁 Tenemos:
 🥩 Deshidratados
 💧 Snacks Húmedos
-🦴 Snacks
-¿Te interesa conocer alguno?"
-   - Si el cliente elige una categoría, llama get_products SIN filtro y muestra los de esa categoría por category.name.
-   - Si el cliente dice que no quiere snacks (o "no", "así está bien", "solo eso"), pasa al paso 3.
-   - NUNCA mezcles productos BARF con snacks en el mismo mensaje.
+🦴 Galletas
+¿Le interesa conocer alguno?"
+   - Si el cliente elige una categoría → llama get_products SIN filtro y muestra solo los productos de esa categoría (filtra por category.name).
+   - Si el cliente dice "no", "no gracias", "así está bien", "solo eso" → pasa al paso 3.
+   - NUNCA mezcles BARF con snacks en el mismo mensaje.
+   - NUNCA pases al paso 3 sin haber ofrecido los snacks primero.
 3. Verifica los DATOS YA GUARDADOS. Si no tienes el nombre del cliente (o dice "Desconocido"), pídelo y llama update_customer_info. Si no tienes la dirección de entrega, pídela y llama update_customer_info. Solo pide lo que no tengas.
 4. Llama get_cities y muestra las ciudades disponibles.
 5. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona. Luego pregunta: "¿Confirmamos el pedido con entrega a [dirección]?" — espera que el cliente confirme.
