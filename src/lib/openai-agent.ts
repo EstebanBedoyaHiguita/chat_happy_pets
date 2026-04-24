@@ -281,15 +281,19 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 
         const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
         if (webhookUrl) {
-          console.log('[Sheets webhook] enviando POST:', JSON.stringify(sheetPayload))
-          fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify(sheetPayload),
-            redirect: 'follow',
-          })
-            .then(res => res.text().then(t => console.log('[Sheets webhook]', res.status, t)))
-            .catch(err => console.error('[Sheets webhook error]', err))
+          try {
+            console.log('[Sheets webhook] enviando POST:', JSON.stringify(sheetPayload))
+            const sheetsRes = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain' },
+              body: JSON.stringify(sheetPayload),
+              redirect: 'follow',
+            })
+            const sheetsText = await sheetsRes.text()
+            console.log('[Sheets webhook]', sheetsRes.status, sheetsText)
+          } catch (err) {
+            console.error('[Sheets webhook error]', err)
+          }
         } else {
           console.warn('[Sheets webhook] GOOGLE_SHEETS_WEBHOOK no configurado')
         }
@@ -454,7 +458,7 @@ FORMATO DE RESPUESTA — CRÍTICO:
 - Si el cliente ya vio un producto y pregunta un detalle puntual, responde del historial sin reenviar la imagen.
 - Si el cliente pregunta por un sabor específico, muestra SOLO ese producto. NUNCA muestres otros cuando piden uno en concreto.
 - ANTES de enviar cualquier imagen, escribe SIEMPRE 1-2 líneas de texto cálido que introduzcan los productos. Nunca envíes imágenes sin contexto conversacional.
-- Para snacks/premios, llama get_products con category: "Deshidratados", "Snacks Humedos" o "Snacks".
+- Para snacks/premios, llama get_products SIN filtro (sin category). Luego filtra tú mismo los resultados por el campo "category.name" del producto: busca los que tengan "Deshidratado", "Snack Húmedo" o "Snack" según lo que el cliente eligió. NUNCA uses el parámetro category porque el API no filtra bien por nombre.
 - NUNCA digas que hay problemas técnicos ni que no puedes obtener precios.
 - Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que el catálogo no está disponible en este momento.
 
