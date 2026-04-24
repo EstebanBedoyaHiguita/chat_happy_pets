@@ -83,11 +83,11 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
             items: {
               type: 'object',
               properties: {
-                productId: { type: 'string', description: '_id del producto obtenido de get_products. OBLIGATORIO para obtener el precio correcto.' },
+                productId: { type: 'string', description: '_id del producto obtenido de get_products. Inclúyelo siempre que lo tengas disponible para garantizar el precio correcto.' },
                 productName: { type: 'string', description: 'Nombre exacto del producto como aparece en el catálogo' },
                 quantity: { type: 'number', description: 'Cantidad de paquetes' },
               },
-              required: ['productId', 'productName', 'quantity'],
+              required: ['productName', 'quantity'],
             },
           },
           cityId: { type: 'string', description: '_id de la ciudad elegida por el cliente' },
