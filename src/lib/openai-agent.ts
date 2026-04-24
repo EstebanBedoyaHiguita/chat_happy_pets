@@ -281,9 +281,12 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 
         const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
         if (webhookUrl) {
-          const params = new URLSearchParams()
-          Object.entries(sheetPayload).forEach(([k, v]) => params.set(k, String(v ?? '')))
-          fetch(`${webhookUrl}?${params.toString()}`, { redirect: 'follow' })
+          fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sheetPayload),
+            redirect: 'follow',
+          })
             .then(res => res.text().then(t => console.log('[Sheets webhook]', res.status, t)))
             .catch(err => console.error('[Sheets webhook error]', err))
         } else {
@@ -444,12 +447,15 @@ FORMATO DE RESPUESTA — CRÍTICO:
 - Muestra máximo 2 productos por mensaje. Si hay más, pregunta cuál le interesa antes de mostrar los demás.
 - NUNCA listes todos los productos de una vez en un solo mensaje.
 - NUNCA digas que no puedes mostrar imágenes. Las imágenes se envían automáticamente al cliente. Si te preguntan, confirma que sí las enviaste.
-- SIEMPRE llama get_products antes de recomendar o mostrar cualquier producto. Nunca uses productos del historial para hacer recomendaciones porque el catálogo puede haber cambiado.
-- Si el cliente ya vio un producto en este chat y solo pregunta el precio o un detalle puntual, puedes responder del historial sin volver a enviar la imagen.
-- Si el cliente pregunta por un sabor o producto específico (ej: "el de res", "el de pollo"), llama get_products, filtra SOLO ese producto del resultado y muéstralo. NUNCA muestres otros productos cuando piden uno específico.
-- Para mostrar productos de snacks/premios, llama get_products con el parámetro category usando el nombre exacto de la categoría: "Deshidratados", "Snacks Humedos" o "Snacks". Así solo obtienes los productos de esa categoría.
-- NUNCA digas que hay problemas técnicos o que no puedes obtener precios.
-- Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que en este momento no puedes mostrar el catálogo y pide al cliente que intente en un momento.
+- SIEMPRE llama get_products SIN filtro de categoría para obtener el catálogo completo. El catálogo tiene más de 15 productos — nunca asumas que ya los conoces todos.
+- Cuando recibas el resultado de get_products, BUSCA en TODA la lista antes de decir que un producto no existe. Si el cliente pregunta por salmón, busca "salmon" o "salmón" en todos los nombres antes de responder.
+- Si el cliente pregunta por un producto que NO está en el catálogo, menciona productos similares que SÍ tienes. Nunca digas "no tenemos" sin revisar toda la lista primero.
+- Si el cliente ya vio un producto y pregunta un detalle puntual, responde del historial sin reenviar la imagen.
+- Si el cliente pregunta por un sabor específico, muestra SOLO ese producto. NUNCA muestres otros cuando piden uno en concreto.
+- ANTES de enviar cualquier imagen, escribe SIEMPRE 1-2 líneas de texto cálido que introduzcan los productos. Nunca envíes imágenes sin contexto conversacional.
+- Para snacks/premios, llama get_products con category: "Deshidratados", "Snacks Humedos" o "Snacks".
+- NUNCA digas que hay problemas técnicos ni que no puedes obtener precios.
+- Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que el catálogo no está disponible en este momento.
 
 UPSELL DE SNACKS Y PREMIOS:
 Después de que el cliente tenga claro qué dietas BARF va a pedir y ANTES de pasar al proceso de pedido, ofrece siempre los complementos así:
