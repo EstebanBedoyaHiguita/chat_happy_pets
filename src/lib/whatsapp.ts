@@ -28,6 +28,22 @@ async function sendToWhatsApp(payload: Record<string, unknown>): Promise<string 
   return data.messages?.[0]?.id ?? null
 }
 
+export async function markWhatsAppMessageRead(messageId: string): Promise<void> {
+  if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) return
+  fetch(BASE_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+    }),
+  }).catch(() => {})
+}
+
 export async function sendWhatsAppMessage(to: string, text: string): Promise<string | null> {
   return sendToWhatsApp({
     messaging_product: 'whatsapp',

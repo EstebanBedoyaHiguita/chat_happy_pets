@@ -3,7 +3,7 @@ import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, sendWhatsAppMessage, sendWhatsAppImage, extractImageUrls } from '@/lib/whatsapp'
+import { parseWebhookPayload, sendWhatsAppMessage, sendWhatsAppImage, extractImageUrls, markWhatsAppMessageRead } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc } from '@/lib/models/Room'
@@ -61,6 +61,9 @@ async function processMessage(parsed: {
   messageId: string
   timestamp: string
 }) {
+  // Mark as read immediately so the client sees ✓✓ azules mientras el agente procesa
+  markWhatsAppMessageRead(parsed.messageId)
+
   await connectDB()
 
   // Deduplicate: ignore already-processed messages
