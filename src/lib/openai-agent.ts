@@ -388,6 +388,7 @@ export interface AgentResponse {
   transferReason?: string
   imageUrls: string[]
   products: AgentProduct[]
+  orderCreated: boolean
 }
 
 export interface RoomKnownData {
@@ -537,6 +538,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
   const collectedImageUrls: string[] = []
   const collectedProducts: AgentProduct[] = []
   const HAPPY_PETS_BASE = process.env.HAPPY_PETS_API_URL ?? ''
+  let orderCreated = false
 
   // Handle tool calls
   while (response.choices[0].finish_reason === 'tool_calls') {
@@ -548,6 +550,14 @@ Si NO hay que transferir, no incluyas ese JSON.`
     for (const toolCall of toolCalls) {
       const args = JSON.parse(toolCall.function.arguments || '{}')
       const result = await executeTool(toolCall.function.name, args, waId, collectedProducts, roomData)
+
+      // Detect successful order creation
+      if (toolCall.function.name === 'create_order') {
+        try {
+          const parsed = JSON.parse(result)
+          if (parsed.success === true) orderCreated = true
+        } catch { /* ignore */ }
+      }
 
       // Extract structured product data from catalog calls
       if (toolCall.function.name === 'get_products' || toolCall.function.name === 'get_featured_products') {
@@ -626,5 +636,5 @@ Si NO hay que transferir, no incluyas ese JSON.`
     // No transfer JSON found, that's fine
   }
 
-  return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: mentionedProducts }
+  return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: mentionedProducts, orderCreated }
 }

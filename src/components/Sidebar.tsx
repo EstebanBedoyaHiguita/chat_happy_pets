@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 
 const NAV = [
   { href: '/chats', label: 'Chats', icon: '💬' },
+  { href: '/orders', label: 'Pedidos', icon: '📦' },
   { href: '/settings/knowledge', label: 'Conocimiento', icon: '🧠' },
   { href: '/settings/rules', label: 'Reglas', icon: '⚡' },
   { href: '/settings/close-reasons', label: 'Motivos de cierre', icon: '🔴' },

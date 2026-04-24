@@ -250,5 +250,12 @@ async function processMessage(parsed: {
     await sendWhatsAppMessage(parsed.from, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
   }
 
+  // Close conversation automatically after a successful order
+  if (agentResponse.orderCreated) {
+    room.status = 'closed'
+    room.closeReasonName = 'Pedido realizado'
+    room.closedBy = 'bot'
+  }
+
   await room.save()
 }
