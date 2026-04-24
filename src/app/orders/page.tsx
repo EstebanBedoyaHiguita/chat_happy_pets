@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Sidebar from '@/components/Sidebar'
 
-type OrderStatus = 'pending' | 'paid' | 'delivered' | 'cancelled'
+type OrderStatus = 'pending' | 'delivered' | 'cancelled'
 
 interface BotOrderItem {
   name: string
@@ -28,19 +28,18 @@ interface BotOrder {
     notes?: string
   }
   status: OrderStatus
+  paid: boolean
   createdAt: string
 }
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: 'Pendiente',
-  paid: 'Pagado',
   delivered: 'Entregado',
   cancelled: 'Cancelado',
 }
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
   pending: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
-  paid: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
   delivered: 'bg-green-500/20 text-green-300 border-green-500/30',
   cancelled: 'bg-red-500/20 text-red-300 border-red-500/30',
 }
@@ -59,15 +58,15 @@ export default function OrdersPage() {
 
   useEffect(() => { fetchOrders() }, [])
 
-  async function handleStatusChange(id: string, status: OrderStatus) {
+  async function handlePatch(id: string, patch: { status?: OrderStatus; paid?: boolean }) {
     setUpdating(id)
     const res = await fetch(`/api/bot-orders/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(patch),
     })
     if (res.ok) {
-      setOrders((prev) => prev.map((o) => o._id === id ? { ...o, status } : o))
+      setOrders((prev) => prev.map((o) => o._id === id ? { ...o, ...patch } : o))
     }
     setUpdating(null)
   }
@@ -102,6 +101,10 @@ export default function OrdersPage() {
                 </div>
               )
             })}
+            <div className="rounded-xl border p-4 bg-blue-500/20 text-blue-300 border-blue-500/30">
+              <div className="text-2xl font-bold">{orders.filter((o) => o.paid).length}</div>
+              <div className="text-xs mt-1 opacity-80">Pagados</div>
+            </div>
           </div>
 
           {loading ? (
@@ -118,7 +121,7 @@ export default function OrdersPage() {
                 <div key={order._id} className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
                   {/* Header row */}
                   <div
-                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-750"
+                    className="flex items-center justify-between p-4 cursor-pointer"
                     onClick={() => setExpanded(expanded === order._id ? null : order._id)}
                   >
                     <div className="flex items-center gap-4">
@@ -132,11 +135,29 @@ export default function OrdersPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
                       <div className="text-right">
                         <div className="text-white font-semibold text-sm">{fmt(order.total)}</div>
                         <div className="text-gray-500 text-xs">{order.items.length} producto{order.items.length !== 1 ? 's' : ''}</div>
                       </div>
+
+                      {/* Paid toggle */}
+                      <button
+                        disabled={updating === order._id}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handlePatch(order._id, { paid: !order.paid })
+                        }}
+                        title={order.paid ? 'Marcar como no pagado' : 'Marcar como pagado'}
+                        className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+                          order.paid
+                            ? 'bg-blue-500/20 text-blue-300 border-blue-500/30 hover:bg-blue-500/30'
+                            : 'bg-gray-700 text-gray-400 border-gray-600 hover:bg-gray-600 hover:text-white'
+                        }`}
+                      >
+                        <span>{order.paid ? '✓' : '○'}</span>
+                        <span>Pagado</span>
+                      </button>
 
                       {/* Status dropdown */}
                       <select
@@ -144,7 +165,7 @@ export default function OrdersPage() {
                         disabled={updating === order._id}
                         onChange={(e) => {
                           e.stopPropagation()
-                          handleStatusChange(order._id, e.target.value as OrderStatus)
+                          handlePatch(order._id, { status: e.target.value as OrderStatus })
                         }}
                         onClick={(e) => e.stopPropagation()}
                         className={`text-xs font-semibold px-3 py-1.5 rounded-lg border cursor-pointer focus:outline-none disabled:opacity-50 ${STATUS_COLORS[order.status]} bg-transparent`}

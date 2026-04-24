@@ -23,7 +23,8 @@ export interface BotOrderDoc extends Document {
     department: string
     notes?: string
   }
-  status: 'pending' | 'paid' | 'delivered' | 'cancelled'
+  status: 'pending' | 'delivered' | 'cancelled'
+  paid: boolean
   createdAt: Date
 }
 
@@ -53,9 +54,10 @@ const BotOrderSchema = new Schema<BotOrderDoc>(
     },
     status: {
       type: String,
-      enum: ['pending', 'paid', 'delivered', 'cancelled'],
+      enum: ['pending', 'delivered', 'cancelled'],
       default: 'pending',
     },
+    paid: { type: Boolean, default: false },
   },
   { timestamps: true }
 )
