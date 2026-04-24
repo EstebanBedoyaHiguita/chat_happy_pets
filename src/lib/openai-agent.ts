@@ -290,18 +290,24 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 
         const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
         if (webhookUrl) {
+          const ctrl = new AbortController()
+          const timer = setTimeout(() => ctrl.abort(), 12000)
           try {
             console.log('[Sheets webhook] enviando POST:', JSON.stringify(sheetPayload))
             const sheetsRes = await fetch(webhookUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'text/plain' },
               body: JSON.stringify(sheetPayload),
-              redirect: 'follow',
+              redirect: 'manual',
+              signal: ctrl.signal,
             })
-            const sheetsText = await sheetsRes.text()
-            console.log('[Sheets webhook]', sheetsRes.status, sheetsText)
-          } catch (err) {
-            console.error('[Sheets webhook error]', err)
+            clearTimeout(timer)
+            const sheetsText = await sheetsRes.text().catch(() => '')
+            console.log('[Sheets webhook] status:', sheetsRes.status, 'body:', sheetsText.substring(0, 200))
+          } catch (err: unknown) {
+            clearTimeout(timer)
+            const msg = err instanceof Error ? err.message : String(err)
+            console.error('[Sheets webhook error]', msg)
           }
         } else {
           console.warn('[Sheets webhook] GOOGLE_SHEETS_WEBHOOK no configurado')
