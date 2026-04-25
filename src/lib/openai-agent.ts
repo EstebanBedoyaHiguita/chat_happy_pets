@@ -284,7 +284,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         const snacksText = snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - ')
 
         const sheetPayload = {
-          fecha: new Date().toLocaleString('es-CO'),
+          fecha: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
           celular: waId ?? '',
           vend: 'Bot',
           nombreCliente: roomData?.name ?? '',
