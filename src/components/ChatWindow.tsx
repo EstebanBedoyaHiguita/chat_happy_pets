@@ -21,6 +21,10 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [closeReasons, setCloseReasons] = useState<ICloseReason[]>([])
   const [selectedReasonId, setSelectedReasonId] = useState('')
   const [closing, setClosing] = useState(false)
+  const [showReopenModal, setShowReopenModal] = useState(false)
+  const [templates, setTemplates] = useState<{ _id: string; name: string; displayName: string; bodyText: string; variables: string[]; metaStatus: string; language: string }[]>([])
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+  const [templateVars, setTemplateVars] = useState<string[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -131,25 +135,41 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     }
   }
 
-  async function handleReopen() {
+  async function handleOpenReopenModal() {
+    const res = await fetch('/api/templates')
+    if (res.ok) setTemplates(await res.json())
+    setSelectedTemplate('')
+    setTemplateVars([])
+    setShowReopenModal(true)
+  }
+
+  function handleSelectTemplate(id: string) {
+    setSelectedTemplate(id)
+    const tpl = templates.find((t) => t._id === id)
+    setTemplateVars(tpl ? Array(tpl.variables.length).fill('') : [])
+  }
+
+  async function handleReopen(e: React.FormEvent) {
+    e.preventDefault()
     if (reopening) return
+    const tpl = templates.find((t) => t._id === selectedTemplate)
+    if (!tpl) return
     setReopening(true)
+    // Build preview text replacing {{n}} with actual values
+    const bodyText = tpl.bodyText.replace(/\{\{(\d+)\}\}/g, (_, n) => templateVars[Number(n) - 1] ?? `{{${n}}}`)
     const res = await fetch(`/api/conversations/${conversation._id}/reopen`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        templateName: 'retoma',
-        languageCode: 'es',
-        components: [
-          {
-            type: 'body',
-            parameters: [{ type: 'text', text: 'Paula' }],
-          },
-        ],
+        templateName: tpl.name,
+        languageCode: tpl.language,
+        variables: templateVars,
+        bodyText,
       }),
     })
     setReopening(false)
     if (res.ok) {
+      setShowReopenModal(false)
       onStatusChange()
     }
   }
@@ -217,9 +237,9 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
               </button>
             )}
             {isClosed && (
-              <button onClick={handleReopen} disabled={reopening}
-                className="bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
-                {reopening ? 'Enviando...' : '📨 Retomar conversación'}
+              <button onClick={handleOpenReopenModal}
+                className="bg-purple-700 hover:bg-purple-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                📨 Retomar conversación
               </button>
             )}
           </div>
@@ -329,6 +349,80 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Reopen modal ── */}
+      {showReopenModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-white font-semibold text-base mb-1">Retomar conversación</h2>
+            <p className="text-gray-400 text-xs mb-4">Elige una plantilla aprobada para enviar al cliente y reabrir la ventana de 24h.</p>
+
+            {templates.filter((t) => t.metaStatus === 'APPROVED').length === 0 ? (
+              <div className="text-center py-6">
+                <p className="text-yellow-400 text-sm">No hay plantillas aprobadas por Meta aún.</p>
+                <p className="text-gray-500 text-xs mt-1">Ve a Configuración → Plantillas para crear y enviar a revisión.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleReopen} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  {templates.filter((t) => t.metaStatus === 'APPROVED').map((t) => (
+                    <label key={t._id} className={`flex flex-col gap-1 cursor-pointer p-3 rounded-xl border transition-colors ${selectedTemplate === t._id ? 'border-purple-500 bg-purple-500/10' : 'border-gray-700 hover:bg-gray-800'}`}>
+                      <div className="flex items-center gap-2">
+                        <input type="radio" name="template" value={t._id}
+                          checked={selectedTemplate === t._id}
+                          onChange={() => handleSelectTemplate(t._id)}
+                          className="accent-purple-500"
+                        />
+                        <span className="text-white text-sm font-medium">{t.displayName}</span>
+                      </div>
+                      <p className="text-gray-500 text-xs pl-5 whitespace-pre-wrap">{t.bodyText}</p>
+                    </label>
+                  ))}
+                </div>
+
+                {selectedTemplate && templateVars.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-gray-400 text-xs font-medium">Completa las variables:</p>
+                    {templateVars.map((v, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-gray-500 text-xs w-16 flex-shrink-0">{`{{${i + 1}}}`}</span>
+                        <input
+                          value={v}
+                          onChange={(e) => {
+                            const updated = [...templateVars]
+                            updated[i] = e.target.value
+                            setTemplateVars(updated)
+                          }}
+                          placeholder={templates.find((t) => t._id === selectedTemplate)?.variables[i] ?? `Variable ${i + 1}`}
+                          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2 justify-end mt-1">
+                  <button type="button" onClick={() => setShowReopenModal(false)}
+                    className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors">
+                    Cancelar
+                  </button>
+                  <button type="submit" disabled={!selectedTemplate || reopening}
+                    className="bg-purple-700 hover:bg-purple-600 disabled:bg-gray-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+                    {reopening ? 'Enviando...' : '📨 Enviar plantilla'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {templates.filter((t) => t.metaStatus === 'APPROVED').length === 0 && (
+              <button onClick={() => setShowReopenModal(false)}
+                className="mt-3 w-full text-gray-400 hover:text-white text-sm py-2 rounded-lg transition-colors">
+                Cerrar
+              </button>
+            )}
           </div>
         </div>
       )}

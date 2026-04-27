@@ -10,6 +10,7 @@ const NAV = [
   { href: '/settings/knowledge', label: 'Conocimiento', icon: '🧠', badgeKey: null },
   { href: '/settings/rules', label: 'Reglas', icon: '⚡', badgeKey: null },
   { href: '/settings/close-reasons', label: 'Motivos de cierre', icon: '🔴', badgeKey: null },
+  { href: '/settings/templates', label: 'Plantillas', icon: '📋', badgeKey: null },
 ]
 
 export default function Sidebar() {
