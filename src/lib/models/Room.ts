@@ -1,8 +1,11 @@
 import mongoose, { Schema, Document } from 'mongoose'
 import type { ConversationStatus } from '@/types'
 
+export type ChannelType = 'whatsapp' | 'messenger' | 'instagram'
+
 export interface RoomDoc extends Document {
   waId: string
+  channel: ChannelType
   name: string
   phone: string
   petName: string
@@ -33,6 +36,7 @@ export interface RoomDoc extends Document {
 const RoomSchema = new Schema<RoomDoc>(
   {
     waId: { type: String, required: true, unique: true },
+    channel: { type: String, enum: ['whatsapp', 'messenger', 'instagram'], default: 'whatsapp' },
     name: { type: String, default: 'Desconocido' },
     phone: { type: String, required: true },
     petName: { type: String, default: '' },

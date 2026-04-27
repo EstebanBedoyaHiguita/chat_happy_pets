@@ -111,6 +111,8 @@ export default function ConversationList({
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-medium text-white truncate">{conv.name}</span>
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[conv.status]}`} />
+                    {conv.channel === 'messenger' && <span title="Messenger" className="text-xs">💬</span>}
+                    {conv.channel === 'instagram' && <span title="Instagram" className="text-xs">📸</span>}
                   </div>
                   <p className="text-xs text-gray-400 truncate">{conv.lastMessage || '—'}</p>
                 </div>

@@ -4,26 +4,23 @@ import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, sendWhatsAppMessage, sendWhatsAppImage, extractImageUrls, markWhatsAppMessageRead } from '@/lib/whatsapp'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
-import type { RoomDoc } from '@/lib/models/Room'
+import type { RoomDoc, ChannelType } from '@/lib/models/Room'
 import type { Document } from 'mongoose'
 
 async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
   const update: Record<string, string> = {}
 
-  // Pet type: perro/gato
   if (!room.petType) {
     if (/\b(perro|perrita|cachorro|can)\b/i.test(text)) update.petType = 'Perro'
     else if (/\b(gato|gatita|gatito|felino)\b/i.test(text)) update.petType = 'Gato'
   }
 
-  // Age: "tiene 8 años", "8 años"
   const ageMatch = text.match(/(\d+)\s*a[ñn]os?/i)
   if (ageMatch && !room.petAge) update.petAge = `${ageMatch[1]} años`
 
-  // Weight: "pesa 30 kg", "30 kilos", "30kg"
   const weightMatch = text.match(/(\d+(?:[.,]\d+)?)\s*k(?:g|ilos?)/i)
   if (weightMatch && !room.petWeight) update.petWeight = `${weightMatch[1]} kg`
 
@@ -33,7 +30,7 @@ async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
   }
 }
 
-// GET: Meta webhook verification
+// GET: Meta webhook verification (works for all 3 channels)
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const mode = searchParams.get('hub.mode')
@@ -46,10 +43,22 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 }
 
-// POST: Receive incoming messages
+// POST: Receive incoming messages from WhatsApp, Messenger or Instagram
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const parsed = parseWebhookPayload(body)
+
+  // Detect channel by object field
+  const object = body.object as string
+
+  let parsed
+  if (object === 'whatsapp_business_account') {
+    parsed = parseWebhookPayload(body)
+  } else if (object === 'page' || object === 'instagram') {
+    parsed = parseMessengerPayload(body)
+  } else {
+    return NextResponse.json({ status: 'ignored' }, { status: 200 })
+  }
+
   if (!parsed) return NextResponse.json({ status: 'ignored' }, { status: 200 })
   waitUntil(processMessage(parsed).catch(console.error))
   return NextResponse.json({ status: 'ok' }, { status: 200 })
@@ -61,21 +70,24 @@ async function processMessage(parsed: {
   text: string
   messageId: string
   timestamp: string
+  channel: ChannelType
 }) {
-  // Mark as read immediately so the client sees ✓✓ azules mientras el agente procesa
-  markWhatsAppMessageRead(parsed.messageId)
+  // Mark as read (WhatsApp only — Messenger/Instagram mark read via different API)
+  if (parsed.channel === 'whatsapp') markWhatsAppMessageRead(parsed.messageId)
 
   await connectDB()
 
-  // Deduplicate: ignore already-processed messages
+  // Deduplicate
   const existing = await Message.findOne({ waMessageId: parsed.messageId })
   if (existing) return
 
-  // Get or create room
-  let room = await Room.findOne({ waId: parsed.from })
+  // Get or create room — key is channel:senderId to allow same person on multiple channels
+  const roomKey = parsed.channel === 'whatsapp' ? parsed.from : `${parsed.channel}:${parsed.from}`
+  let room = await Room.findOne({ waId: roomKey })
   if (!room) {
     room = await Room.create({
-      waId: parsed.from,
+      waId: roomKey,
+      channel: parsed.channel,
       name: parsed.name,
       phone: parsed.from,
       status: 'bot',
@@ -88,13 +100,10 @@ async function processMessage(parsed: {
     room.lastMessageAt = new Date()
     room.windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
     room.unreadCount += 1
-    if (room.name === 'Desconocido' && parsed.name !== 'Desconocido') {
-      room.name = parsed.name
-    }
+    if (room.name === 'Desconocido' && parsed.name !== 'Desconocido') room.name = parsed.name
     await room.save()
   }
 
-  // Save incoming message
   await Message.create({
     roomId: room._id,
     direction: 'inbound',
@@ -104,10 +113,8 @@ async function processMessage(parsed: {
     timestamp: new Date(),
   })
 
-  // Auto-extract pet data from client message and save to room
   await autoExtractAndSave(room, parsed.text)
 
-  // If closed and client writes again, reactivate to bot
   if (room.status === 'closed') {
     room.status = 'bot'
     room.closeReasonId = undefined
@@ -117,31 +124,24 @@ async function processMessage(parsed: {
     await room.save()
   }
 
-  // If conversation is in human mode, don't respond
   if (room.status !== 'bot') return
 
-  // Get agent config
   let config = await AgentConfig.findOne()
-  if (!config) {
-    config = await AgentConfig.create({ transferRules: DEFAULT_TRANSFER_RULES })
-  }
+  if (!config) config = await AgentConfig.create({ transferRules: DEFAULT_TRANSFER_RULES })
 
-  // Check keyword transfer rules
   const keywordCheck = checkKeywordRules(parsed.text, config.transferRules)
   if (keywordCheck.triggered) {
     room.status = 'human'
     await room.save()
-    await sendWhatsAppMessage(parsed.from, 'En este momento te voy a conectar con un asesor humano. Por favor espera un momento. 🙏')
+    await sendChannelMessage(parsed.channel, parsed.from, 'En este momento te voy a conectar con un asesor humano. Por favor espera un momento. 🙏')
     return
   }
 
-  // Get last 10 messages for context (most recent, in chronological order)
   const history = await Message.find({ roomId: room._id })
     .sort({ timestamp: -1 })
     .limit(10)
     .then((msgs) => msgs.reverse())
 
-  // Run AI agent
   const roomData: RoomKnownData = {
     name: room.name,
     petName: room.petName || undefined,
@@ -181,20 +181,17 @@ async function processMessage(parsed: {
     roomData
   )
 
-  // Strip any image syntax from bot text
   const { cleanText } = extractImageUrls(agentResponse.text)
-
   let waMessageId: string | null = null
 
   if (agentResponse.products.length > 0) {
-    // Send each product as image with caption (max 2 per message per prompt instructions)
     for (const product of (agentResponse.products as AgentProduct[]).slice(0, 2)) {
       const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
       const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
       if (product.imageUrl) {
-        waMessageId = await sendWhatsAppImage(parsed.from, product.imageUrl, caption)
+        waMessageId = await sendChannelImage(parsed.channel, parsed.from, product.imageUrl, caption)
       } else {
-        waMessageId = await sendWhatsAppMessage(parsed.from, caption)
+        waMessageId = await sendChannelMessage(parsed.channel, parsed.from, caption)
       }
       await Message.create({
         roomId: room._id,
@@ -206,8 +203,7 @@ async function processMessage(parsed: {
       })
     }
   } else {
-    // No products — send text normally
-    waMessageId = await sendWhatsAppMessage(parsed.from, cleanText)
+    waMessageId = await sendChannelMessage(parsed.channel, parsed.from, cleanText)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
@@ -218,7 +214,6 @@ async function processMessage(parsed: {
     })
   }
 
-  // Update summary in background if conversation is getting long
   Message.countDocuments({ roomId: room._id }).then((count) => {
     if (count > 6) {
       Message.find({ roomId: room._id })
@@ -244,17 +239,14 @@ async function processMessage(parsed: {
     }
   }).catch(console.error)
 
-  // Update room last message
   room.lastMessage = agentResponse.text
   room.lastMessageAt = new Date()
 
-  // If agent signals transfer
   if (agentResponse.transfer) {
     room.status = 'human'
-    await sendWhatsAppMessage(parsed.from, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
+    await sendChannelMessage(parsed.channel, parsed.from, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
   }
 
-  // Close conversation automatically after a successful order
   if (agentResponse.orderCreated) {
     room.status = 'closed'
     room.closeReasonName = 'Pedido realizado'

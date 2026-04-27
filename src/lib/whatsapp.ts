@@ -112,6 +112,7 @@ export interface IncomingWhatsAppMessage {
   text: string
   messageId: string
   timestamp: string
+  channel: 'whatsapp' | 'messenger' | 'instagram'
 }
 
 export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhatsAppMessage | null {
@@ -132,6 +133,104 @@ export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhat
       text: (message.text as Record<string, unknown>)?.body as string,
       messageId: message.id as string,
       timestamp: message.timestamp as string,
+      channel: 'whatsapp',
+    }
+  } catch {
+    return null
+  }
+}
+
+// ── Messenger & Instagram ──────────────────────────────────────────────────
+
+const META_PAGE_TOKEN = process.env.META_PAGE_ACCESS_TOKEN
+const INSTAGRAM_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN
+const INSTAGRAM_BUSINESS_ID = process.env.INSTAGRAM_BUSINESS_ID
+
+function getMetaConfig(channel: 'messenger' | 'instagram') {
+  if (channel === 'instagram') {
+    return {
+      token: INSTAGRAM_TOKEN,
+      url: `https://graph.facebook.com/v25.0/${INSTAGRAM_BUSINESS_ID}/messages`,
+    }
+  }
+  return {
+    token: META_PAGE_TOKEN,
+    url: `https://graph.facebook.com/v25.0/me/messages`,
+  }
+}
+
+async function sendMetaMessage(channel: 'messenger' | 'instagram', recipientId: string, text: string): Promise<string | null> {
+  const { token, url } = getMetaConfig(channel)
+  if (!token) { console.error(`Token not set for channel ${channel}`); return null }
+  const res = await fetch(`${url}?access_token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient: { id: recipientId }, message: { text } }),
+  })
+  const data = await res.json()
+  if (!res.ok) { console.error(`Meta send error (${channel}):`, data); return null }
+  return data.message_id ?? null
+}
+
+async function sendMetaImage(channel: 'messenger' | 'instagram', recipientId: string, imageUrl: string, caption?: string): Promise<string | null> {
+  const { token, url } = getMetaConfig(channel)
+  if (!token) return null
+  const res = await fetch(`${url}?access_token=${token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { id: recipientId },
+      message: { attachment: { type: 'image', payload: { url: imageUrl, is_reusable: true } } },
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok) { console.error(`Meta image send error (${channel}):`, data); return null }
+  if (caption) await sendMetaMessage(channel, recipientId, caption)
+  return data.message_id ?? null
+}
+
+export async function sendChannelMessage(
+  channel: 'whatsapp' | 'messenger' | 'instagram',
+  recipientId: string,
+  text: string
+): Promise<string | null> {
+  if (channel === 'whatsapp') return sendWhatsAppMessage(recipientId, text)
+  return sendMetaMessage(channel, recipientId, text)
+}
+
+export async function sendChannelImage(
+  channel: 'whatsapp' | 'messenger' | 'instagram',
+  recipientId: string,
+  imageUrl: string,
+  caption?: string
+): Promise<string | null> {
+  if (channel === 'whatsapp') return sendWhatsAppImage(recipientId, imageUrl, caption)
+  return sendMetaImage(channel, recipientId, imageUrl, caption)
+}
+
+export function parseMessengerPayload(body: Record<string, unknown>): IncomingWhatsAppMessage | null {
+  try {
+    const object = body.object as string
+    if (object !== 'page' && object !== 'instagram') return null
+    const channel: 'messenger' | 'instagram' = object === 'instagram' ? 'instagram' : 'messenger'
+
+    const entry = (body.entry as Record<string, unknown>[])?.[0]
+    const messaging = (entry?.messaging as Record<string, unknown>[])?.[0]
+    if (!messaging) return null
+
+    const message = messaging.message as Record<string, unknown>
+    if (!message || message.is_echo) return null
+    if (!message.text) return null // ignore non-text for now
+
+    const sender = messaging.sender as Record<string, unknown>
+
+    return {
+      from: sender.id as string,
+      name: 'Desconocido',
+      text: message.text as string,
+      messageId: message.mid as string,
+      timestamp: String(messaging.timestamp ?? Date.now()),
+      channel,
     }
   } catch {
     return null

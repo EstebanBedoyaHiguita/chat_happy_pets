@@ -1,4 +1,5 @@
 export type ConversationStatus = 'bot' | 'human' | 'closed'
+export type ChannelType = 'whatsapp' | 'messenger' | 'instagram'
 export type MessageDirection = 'inbound' | 'outbound'
 export type MessageSender = 'user' | 'bot' | 'human'
 export type TransferRuleType = 'keyword' | 'intent'
@@ -6,6 +7,7 @@ export type TransferRuleType = 'keyword' | 'intent'
 export interface IRoom {
   _id: string
   waId: string
+  channel: ChannelType
   name: string
   phone: string
   petName: string
