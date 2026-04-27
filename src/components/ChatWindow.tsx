@@ -25,6 +25,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [templates, setTemplates] = useState<{ _id: string; name: string; displayName: string; bodyText: string; variables: string[]; metaStatus: string; language: string }[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState<string>('')
   const [templateVars, setTemplateVars] = useState<string[]>([])
+  const [reopenError, setReopenError] = useState<string>('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -140,6 +141,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     if (res.ok) setTemplates(await res.json())
     setSelectedTemplate('')
     setTemplateVars([])
+    setReopenError('')
     setShowReopenModal(true)
   }
 
@@ -155,22 +157,30 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     const tpl = templates.find((t) => t._id === selectedTemplate)
     if (!tpl) return
     setReopening(true)
-    // Build preview text replacing {{n}} with actual values
+    setReopenError('')
     const bodyText = tpl.bodyText.replace(/\{\{(\d+)\}\}/g, (_, n) => templateVars[Number(n) - 1] ?? `{{${n}}}`)
-    const res = await fetch(`/api/conversations/${conversation._id}/reopen`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        templateName: tpl.name,
-        languageCode: tpl.language,
-        variables: templateVars,
-        bodyText,
-      }),
-    })
-    setReopening(false)
-    if (res.ok) {
-      setShowReopenModal(false)
-      onStatusChange()
+    try {
+      const res = await fetch(`/api/conversations/${conversation._id}/reopen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateName: tpl.name,
+          languageCode: tpl.language,
+          variables: templateVars,
+          bodyText,
+        }),
+      })
+      if (res.ok) {
+        setShowReopenModal(false)
+        onStatusChange()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setReopenError(data.error ?? `Error ${res.status} al enviar la plantilla`)
+      }
+    } catch {
+      setReopenError('Error de red al enviar la plantilla')
+    } finally {
+      setReopening(false)
     }
   }
 
@@ -406,6 +416,10 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
                       </div>
                     ))}
                   </div>
+                )}
+
+                {reopenError && (
+                  <p className="text-red-400 text-xs bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">{reopenError}</p>
                 )}
 
                 <div className="flex gap-2 justify-end mt-1">

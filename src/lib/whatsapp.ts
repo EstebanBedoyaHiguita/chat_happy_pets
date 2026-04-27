@@ -20,7 +20,7 @@ async function sendToWhatsApp(payload: Record<string, unknown>): Promise<string 
 
   if (!res.ok) {
     const error = await res.json()
-    console.error('Error sending WhatsApp message:', error)
+    console.error('Error sending WhatsApp message:', JSON.stringify(error))
     return null
   }
 
