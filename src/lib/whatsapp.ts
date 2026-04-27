@@ -92,8 +92,11 @@ export async function sendWhatsAppTemplate(
   templateName: string,
   languageCode: string,
   components: Record<string, unknown>[] = []
-): Promise<string | null> {
-  return sendToWhatsApp({
+): Promise<{ messageId: string | null; error: string | null }> {
+  if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
+    return { messageId: null, error: 'WhatsApp credentials not configured' }
+  }
+  const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to,
@@ -103,7 +106,22 @@ export async function sendWhatsAppTemplate(
       language: { code: languageCode },
       ...(components.length > 0 ? { components } : {}),
     },
+  }
+  const res = await fetch(BASE_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
   })
+  const data = await res.json()
+  if (!res.ok) {
+    console.error('Error sending WhatsApp template:', JSON.stringify(data))
+    const metaMsg = data?.error?.message ?? data?.error?.error_data?.details ?? JSON.stringify(data)
+    return { messageId: null, error: metaMsg }
+  }
+  return { messageId: data.messages?.[0]?.id ?? null, error: null }
 }
 
 export interface IncomingWhatsAppMessage {

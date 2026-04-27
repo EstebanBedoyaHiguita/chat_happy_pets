@@ -28,11 +28,11 @@ export async function POST(
     : []
 
   console.log('[reopen] Sending template:', { waId: room.waId, templateName, languageCode, components })
-  const waMessageId = await sendWhatsAppTemplate(room.waId, templateName, languageCode, components)
-  console.log('[reopen] sendWhatsAppTemplate result:', waMessageId)
+  const { messageId: waMessageId, error: metaError } = await sendWhatsAppTemplate(room.waId, templateName, languageCode, components)
 
-  if (!waMessageId) {
-    return NextResponse.json({ error: 'Meta rechazó la plantilla. Verifica que esté APROBADA y que el nombre coincida exactamente con el registrado en Meta.' }, { status: 500 })
+  if (metaError || !waMessageId) {
+    console.error('[reopen] Meta error:', metaError)
+    return NextResponse.json({ error: metaError ?? 'Meta no devolvió ID del mensaje' }, { status: 500 })
   }
 
   // Save outbound message
