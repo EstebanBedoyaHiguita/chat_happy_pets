@@ -12,7 +12,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   await connectDB()
   const body = await req.json()
-  const { displayName, category, language, bodyText, variables } = body
+  const { displayName, category, language, bodyText, variables, variableExamples } = body
 
   if (!displayName || !bodyText) {
     return NextResponse.json({ error: 'displayName y bodyText son requeridos' }, { status: 400 })
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   let metaId = ''
   let metaStatus = 'PENDING'
   try {
-    const meta = await createMetaTemplate({ name, category: category ?? 'UTILITY', language: language ?? 'es', bodyText })
+    const meta = await createMetaTemplate({ name, category: category ?? 'UTILITY', language: language ?? 'es', bodyText, variables: variableExamples ?? variables ?? [] })
     metaId = meta.id
     metaStatus = meta.status ?? 'PENDING'
   } catch (err) {

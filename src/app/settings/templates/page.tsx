@@ -56,6 +56,7 @@ export default function TemplatesPage() {
     language: 'es',
     bodyText: '',
   })
+  const [varExamples, setVarExamples] = useState<string[]>([])
 
   async function fetchTemplates() {
     const res = await fetch('/api/templates')
@@ -67,6 +68,17 @@ export default function TemplatesPage() {
 
   const previewVars = extractVariables(form.bodyText)
 
+  // Keep varExamples in sync with detected variable count
+  function handleBodyTextChange(text: string) {
+    const vars = extractVariables(text)
+    setVarExamples((prev) => {
+      const next = Array(vars.length).fill('')
+      prev.forEach((v, i) => { if (i < next.length) next[i] = v })
+      return next
+    })
+    setForm({ ...form, bodyText: text })
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (saving) return
@@ -75,7 +87,7 @@ export default function TemplatesPage() {
     const res = await fetch('/api/templates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, variables: previewVars }),
+      body: JSON.stringify({ ...form, variables: previewVars, variableExamples: varExamples }),
     })
     const data = await res.json()
     if (!res.ok) {
@@ -83,6 +95,7 @@ export default function TemplatesPage() {
     } else {
       setTemplates((prev) => [data, ...prev])
       setForm({ displayName: '', category: 'UTILITY', language: 'es', bodyText: '' })
+      setVarExamples([])
       setShowForm(false)
     }
     setSaving(false)
@@ -182,7 +195,7 @@ export default function TemplatesPage() {
                 </label>
                 <textarea
                   value={form.bodyText}
-                  onChange={(e) => setForm({ ...form, bodyText: e.target.value })}
+                  onChange={(e) => handleBodyTextChange(e.target.value)}
                   placeholder={`Hola {{1}}, hace un tiempo no sabemos de ti. ¿Cómo está {{2}}? ¿Te gustaría continuar con el pedido de alimento BARF? 🐾`}
                   rows={4}
                   required
@@ -191,14 +204,27 @@ export default function TemplatesPage() {
               </div>
 
               {previewVars.length > 0 && (
-                <div className="bg-gray-900 rounded-lg p-3">
-                  <p className="text-gray-400 text-xs mb-1">Variables detectadas ({previewVars.length}):</p>
-                  <div className="flex flex-wrap gap-2">
-                    {previewVars.map((v, i) => (
-                      <span key={i} className="text-xs bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">{`{{${i + 1}}}`} → {v}</span>
+                <div className="bg-gray-900 rounded-lg p-3 space-y-3">
+                  <div>
+                    <p className="text-gray-400 text-xs mb-2">Valores de ejemplo para Meta <span className="text-red-400">*</span> — Meta los revisa para aprobar la plantilla:</p>
+                    {previewVars.map((_, i) => (
+                      <div key={i} className="flex items-center gap-2 mb-2">
+                        <span className="text-blue-400 text-xs font-mono w-10 flex-shrink-0">{`{{${i + 1}}}`}</span>
+                        <input
+                          value={varExamples[i] ?? ''}
+                          onChange={(e) => {
+                            const next = [...varExamples]
+                            next[i] = e.target.value
+                            setVarExamples(next)
+                          }}
+                          placeholder={`Ej: ${i === 0 ? 'Juan' : i === 1 ? 'Firulais' : `valor ${i + 1}`}`}
+                          required
+                          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
                     ))}
                   </div>
-                  <p className="text-gray-500 text-xs mt-2">Vista previa: <span className="text-gray-300">{previewText}</span></p>
+                  <p className="text-gray-500 text-xs">Vista previa: <span className="text-gray-300">{previewText}</span></p>
                 </div>
               )}
 

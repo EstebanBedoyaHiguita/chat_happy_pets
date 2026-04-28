@@ -13,7 +13,17 @@ export async function createMetaTemplate(params: {
   category: string
   language: string
   bodyText: string
+  variables?: string[]  // example values for {{1}}, {{2}}, etc.
 }): Promise<{ id: string; status: string }> {
+  const bodyComponent: Record<string, unknown> = { type: 'BODY', text: params.bodyText }
+
+  // Meta requires example values for any {{n}} variables, otherwise it rejects the template
+  if (params.variables && params.variables.length > 0) {
+    bodyComponent.example = {
+      body_text: [params.variables.map((v) => v || `Ejemplo ${params.variables!.indexOf(v) + 1}`)],
+    }
+  }
+
   const res = await fetch(
     `https://graph.facebook.com/${API_VERSION}/${WABA_ID}/message_templates`,
     {
@@ -26,9 +36,7 @@ export async function createMetaTemplate(params: {
         name: params.name,
         category: params.category,
         language: params.language,
-        components: [
-          { type: 'BODY', text: params.bodyText },
-        ],
+        components: [bodyComponent],
       }),
     }
   )
