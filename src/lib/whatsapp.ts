@@ -64,6 +64,24 @@ export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: 
   })
 }
 
+export async function getWhatsAppMediaAsBase64(mediaId: string): Promise<string | null> {
+  if (!ACCESS_TOKEN) return null
+  const metaRes = await fetch(`https://graph.facebook.com/${API_VERSION}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  })
+  if (!metaRes.ok) return null
+  const metaData = await metaRes.json()
+  const downloadUrl = metaData.url as string
+  const mimeType = (metaData.mime_type as string) ?? 'image/jpeg'
+  const mediaRes = await fetch(downloadUrl, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  })
+  if (!mediaRes.ok) return null
+  const buffer = await mediaRes.arrayBuffer()
+  const base64 = Buffer.from(buffer).toString('base64')
+  return `data:${mimeType};base64,${base64}`
+}
+
 export function extractImageUrls(text: string): { cleanText: string; imageUrls: string[] } {
   const imageUrls: string[] = []
 
@@ -131,6 +149,9 @@ export interface IncomingWhatsAppMessage {
   messageId: string
   timestamp: string
   channel: 'whatsapp' | 'messenger' | 'instagram'
+  mediaType?: 'image' | 'audio' | 'video'
+  mediaId?: string   // WhatsApp media_id (requires auth download)
+  mediaUrl?: string  // Messenger/Instagram direct URL
 }
 
 export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhatsAppMessage | null {
@@ -140,19 +161,42 @@ export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhat
     const value = changes?.value as Record<string, unknown>
 
     const message = (value?.messages as Record<string, unknown>[])?.[0]
-    if (!message || message.type !== 'text') return null
+    if (!message) return null
 
     const contact = (value?.contacts as Record<string, unknown>[])?.[0]
     const profile = contact?.profile as Record<string, unknown>
 
-    return {
+    const base = {
       from: message.from as string,
       name: (profile?.name as string) ?? 'Desconocido',
-      text: (message.text as Record<string, unknown>)?.body as string,
       messageId: message.id as string,
       timestamp: message.timestamp as string,
-      channel: 'whatsapp',
+      channel: 'whatsapp' as const,
     }
+
+    if (message.type === 'text') {
+      return { ...base, text: (message.text as Record<string, unknown>)?.body as string }
+    }
+
+    if (message.type === 'image') {
+      const img = message.image as Record<string, unknown>
+      return {
+        ...base,
+        text: (img?.caption as string) ?? '',
+        mediaType: 'image',
+        mediaId: img?.id as string,
+      }
+    }
+
+    if (message.type === 'audio') {
+      return { ...base, text: '', mediaType: 'audio' }
+    }
+
+    if (message.type === 'video') {
+      return { ...base, text: '', mediaType: 'video' }
+    }
+
+    return null
   } catch {
     return null
   }
@@ -238,18 +282,38 @@ export function parseMessengerPayload(body: Record<string, unknown>): IncomingWh
 
     const message = messaging.message as Record<string, unknown>
     if (!message || message.is_echo) return null
-    if (!message.text) return null // ignore non-text for now
 
     const sender = messaging.sender as Record<string, unknown>
-
-    return {
+    const base = {
       from: sender.id as string,
       name: 'Desconocido',
-      text: message.text as string,
       messageId: message.mid as string,
       timestamp: String(messaging.timestamp ?? Date.now()),
       channel,
     }
+
+    if (message.text) {
+      return { ...base, text: message.text as string }
+    }
+
+    const attachments = message.attachments as Record<string, unknown>[] | undefined
+    const attachment = attachments?.[0]
+    if (!attachment) return null
+
+    const attachType = attachment.type as string
+    const payload = attachment.payload as Record<string, unknown>
+
+    if (attachType === 'image') {
+      return { ...base, text: '', mediaType: 'image', mediaUrl: payload?.url as string }
+    }
+    if (attachType === 'audio') {
+      return { ...base, text: '', mediaType: 'audio' }
+    }
+    if (attachType === 'video') {
+      return { ...base, text: '', mediaType: 'video' }
+    }
+
+    return null
   } catch {
     return null
   }

@@ -121,7 +121,13 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'update_customer_info',
-      description: 'LLAMA ESTA FUNCIÓN INMEDIATAMENTE cada vez que el cliente mencione cualquier dato: su nombre, el nombre/tipo/edad/peso de cualquiera de sus mascotas, o su dirección. No esperes a tener todos los datos, llámala cada vez que aprendas uno nuevo.',
+      description: `LLAMA ESTA FUNCIÓN INMEDIATAMENTE cada vez que aprendas cualquier dato nuevo del cliente o su mascota. Reglas:
+1. Nombre de la mascota: en cuanto el cliente lo diga, llama esta función con petName. SIEMPRE.
+2. Tipo de mascota: si tú preguntaste "¿cómo se llama tu perrito?" y el cliente respondió con el nombre, ya sabes que es Perro — llama esta función con petType="Perro" y petName=<nombre dado>. No esperes a que el cliente repita "es un perro".
+3. Edad y peso: en cuanto los mencione, llama esta función.
+4. Dirección: en cuanto el cliente dé la dirección de entrega (ya sea durante el pedido o en cualquier momento), llama esta función con address antes de continuar.
+5. Nombre del cliente: en cuanto lo mencione.
+No esperes a tener todos los datos. Llámala con cada dato nuevo por separado si es necesario.`,
       parameters: {
         type: 'object',
         properties: {
@@ -271,34 +277,38 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         
         // Map items to sheet columns by product name
         const sheetNorm = (s: string) => s.toLowerCase()
-        const qty = (keyword: string) => {
-          const item = items.find(i => sheetNorm(i.name).includes(keyword))
+
+        // Classify by whether the name contains "barf" or "dieta" — snacks never do
+        const isBarf = (name: string) => sheetNorm(name).includes('barf') || sheetNorm(name).includes('dieta')
+        const barfItems = items.filter(i => isBarf(i.name))
+        const snackItems = items.filter(i => !isBarf(i.name))
+        const snacksText = snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - ')
+
+        // Match only within BARF products; exclude lets "Pollo" not match "Pollo con Frutas"
+        const barfQty = (keyword: string, exclude?: string) => {
+          const item = barfItems.find(i => {
+            const n = sheetNorm(i.name)
+            return n.includes(keyword) && (!exclude || !n.includes(exclude))
+          })
           return item ? item.quantity : ''
         }
-
-        // Items que NO van en columnas BARF estándar → van al campo snacks (col 21)
-        const barfKeywords = ['pollo', 'fruta', 'cordero', 'res', 'pez', 'pescado', 'gato', 'salmon', 'salmón', 'conejo']
-        const snackItems = items.filter(i =>
-          !barfKeywords.some(kw => sheetNorm(i.name).includes(kw))
-        )
-        const snacksText = snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - ')
 
         const sheetPayload = {
           fecha: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
           celular: waId ?? '',
           vend: 'Bot',
           nombreCliente: roomData?.name ?? '',
-          pollo:    qty('pollo'),
-          fruta:    qty('fruta'),
-          cordero:  qty('cordero'),
-          res:      qty('res'),
-          pez:      qty('pez') || qty('pescado'),
-          gPollo:   qty('gato pollo') || qty('g.pll'),
-          gTernera: qty('gato ternera') || qty('g.ter') || qty('ternera'),
-          salmon:   qty('salmon') || qty('salmón'),
-          conejo:   qty('conejo'),
+          pollo:    barfQty('pollo', 'fruta'),
+          fruta:    barfQty('fruta'),
+          cordero:  barfQty('cordero'),
+          res:      barfQty('res'),
+          pez:      barfQty('pez') || barfQty('pescado'),
+          gPollo:   barfQty('gato pollo') || barfQty('g.pll'),
+          gTernera: barfQty('gato ternera') || barfQty('g.ter') || barfQty('ternera'),
+          salmon:   barfQty('salmon') || barfQty('salmón'),
+          conejo:   barfQty('conejo'),
           snacks:   snacksText,
-          observaciones: (args.notes as string) ?? '',
+          observaciones: [args.address, args.notes].filter(Boolean).join(' | '),
           orderNumber,
         }
 
@@ -441,7 +451,8 @@ export async function runAgent(
   temperature = 0.7,
   contextSummary = '',
   waId = '',
-  roomData: RoomKnownData = {}
+  roomData: RoomKnownData = {},
+  mediaUrl?: string
 ): Promise<AgentResponse> {
   const summarySection = contextSummary
     ? `\nCONTEXTO PREVIO DE ESTA CONVERSACIÓN (resumen):\n${contextSummary}\n`
@@ -456,15 +467,6 @@ export async function runAgent(
 
   const transferInstructions = `
 
-PERSONALIDAD Y ESTILO DE CONVERSACIÓN:
-- Eres un asesor de nutrición para mascotas, no un vendedor. Tu objetivo es generar confianza y acompañar al cliente, no vender a la fuerza.
-- Cuando el cliente te cuente algo sobre su mascota (nombre, edad, peso), primero reacciona con genuino interés y empatía. Luego haz UNA pregunta de valor, como: ¿qué come actualmente?, ¿cómo está su digestión?, ¿le gustaría armar un plan de alimentación personalizado?
-- NUNCA muestres productos inmediatamente después de recibir datos de la mascota, a menos que el cliente haya pedido explícitamente ver productos.
-- Sé curioso por las mascotas: pregunta sobre su salud, sus gustos, si tiene algún problema digestivo o de peso. Esto construye confianza y te da información para recomendar mejor.
-- Cuando el cliente menciona una segunda mascota, reacciona con entusiasmo y pregunta sobre ella también antes de ofrecer nada.
-- El tono es cálido, cercano y amable, como un amigo experto en nutrición animal que quiere lo mejor para la mascota.
-- Máximo una pregunta por mensaje. No bombardees al cliente con múltiples preguntas a la vez.
-
 FORMATO DE RESPUESTA — CRÍTICO:
 - PROHIBIDO usar asteriscos, negritas, cursivas ni ningún markdown. NUNCA escribas **texto** ni *texto*.
 - Escribe exactamente como en un WhatsApp real: texto plano, saltos de línea y emojis únicamente.
@@ -474,17 +476,24 @@ FORMATO DE RESPUESTA — CRÍTICO:
   $4.300 COP
   Una opción económica y deliciosa para tu perro 🐶
   https://url-de-la-imagen.jpg
-- Muestra máximo 2 productos por mensaje. Si hay más, pregunta cuál le interesa antes de mostrar los demás.
-- NUNCA listes todos los productos de una vez en un solo mensaje.
 - NUNCA digas que no puedes mostrar imágenes. Las imágenes se envían automáticamente al cliente. Si te preguntan, confirma que sí las enviaste.
 - SIEMPRE llama get_products SIN filtro de categoría para obtener el catálogo completo. El catálogo tiene más de 15 productos — nunca asumas que ya los conoces todos.
 - Cuando recibas el resultado de get_products, BUSCA en TODA la lista antes de decir que un producto no existe.
-- Si el cliente pregunta por un sabor específico, muestra SOLO ese producto. NUNCA muestres otros cuando piden uno en concreto.
 - Si el cliente ya vio un producto y pregunta un detalle puntual, responde del historial sin reenviar la imagen.
-- ANTES de enviar cualquier imagen, escribe SIEMPRE 1-2 líneas de texto cálido que introduzcan los productos.
+- ANTES de enviar cualquier imagen, escribe SIEMPRE 1-2 líneas de texto cálido que introduzcan el producto.
 - Para snacks/premios, llama get_products SIN filtro y filtra por category.name del producto.
 - NUNCA digas que hay problemas técnicos ni que no puedes obtener precios.
 - Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que el catálogo no está disponible.
+
+⚠️ REGLA CRÍTICA — CÓMO MOSTRAR DIETAS BARF:
+Cuando el cliente quiera ver las opciones de dieta BARF (dijo "sí", "muéstrame", "quiero ver las opciones" o similar):
+1. Llama get_products para obtener el catálogo completo.
+2. Filtra solo las dietas BARF (excluye snacks, deshidratados, galletas).
+3. Muestra exactamente 3 productos BARF con imagen, nombre, precio y descripción corta.
+4. Después de los 3 productos, menciona los sabores restantes en texto y pregunta si quiere ver alguno. Ejemplo:
+   "También tenemos Cordero, Conejo y Salmón 🐾 ¿Te gustaría que te mostrara alguno de estos?"
+5. Cuando el cliente pida ver otro sabor, muestra SOLO ese producto.
+6. NUNCA muestres más de 3 productos a la vez.
 
 ⚠️ REGLA CRÍTICA — PRODUCTOS E IMÁGENES:
 Solo llama get_products y muestra imágenes cuando el cliente haya dicho EXPLÍCITAMENTE en su último mensaje que quiere ver productos ("sí", "muéstrame", "quiero ver", nombre de un sabor). Si tú acabas de hacer una pregunta ("¿quieres ver las opciones?"), ESPERA la respuesta antes de llamar get_products. NUNCA llames get_products en el mismo turno en que haces una pregunta.
@@ -492,21 +501,31 @@ Para clientes recurrentes: aunque ya hayan comprado antes, SIEMPRE pregunta prim
 
 FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
 1. Si el cliente NO ha elegido productos BARF todavía (dijo "quiero hacer un pedido", "comida para X" o algo vago), pregúntale: "¿Ya sabes qué vas a pedir o quieres que te muestre las opciones de dieta BARF?" — espera su respuesta. NO llames get_products aquí. NO ofrezcas snacks todavía.
-2. ⚠️ UPSELL DE SNACKS — OBLIGATORIO, NO LO SALTES: Tan pronto el cliente haya elegido sus productos BARF (nombró uno o más sabores), ANTES de preguntar dirección o ciudad, SIEMPRE ofrece snacks con este mensaje exacto:
+2. ⚠️ CANTIDADES — OBLIGATORIO ANTES DE CONFIRMAR:
+   - Cuando el cliente mencione uno o varios sabores (ej: "pollo" y "res", o "pollo fruta"), trátalo como productos SEPARADOS.
+   - "Pollo fruta" o "pollo con frutas" es UN producto: Dieta Barf Pollo con Frutas. "Pollo" solo es otro: Dieta Barf Pollo. NUNCA los fusiones en uno.
+   - Si el cliente no indicó la cantidad de algún producto, pregunta SIEMPRE cuántos paquetes quiere de cada uno antes de avanzar.
+   - Una vez tengas todos los productos y cantidades, muestra el resumen para que el cliente confirme:
+     "Perfecto, entonces tu pedido sería:
+     🐔 X paquete(s) Dieta Barf Pollo
+     🍎 X paquete(s) Dieta Barf Pollo con Frutas
+     ¿Es correcto? 😊"
+   - ESPERA que el cliente confirme el resumen antes de continuar.
+3. ⚠️ UPSELL DE SNACKS — OBLIGATORIO, NO LO SALTES: Cuando el cliente confirme los productos BARF, ANTES de preguntar dirección o ciudad, ofrece snacks:
 "¿Le gustaría agregar algún snack o premio para [nombre mascota]? 🎁 Tenemos:
 🥩 Deshidratados
 💧 Snacks Húmedos
 🦴 Galletas
 ¿Le interesa conocer alguno?"
    - Si el cliente elige una categoría → llama get_products SIN filtro y muestra solo los productos de esa categoría (filtra por category.name).
-   - Si el cliente dice "no", "no gracias", "así está bien", "solo eso" → pasa al paso 3.
+   - Si el cliente dice "no", "no gracias", "así está bien", "solo eso" → pasa al paso 4.
    - NUNCA mezcles BARF con snacks en el mismo mensaje.
-   - NUNCA pases al paso 3 sin haber ofrecido los snacks primero.
-3. Verifica los DATOS YA GUARDADOS. Si no tienes el nombre del cliente (o dice "Desconocido"), pídelo y llama update_customer_info. Si no tienes la dirección de entrega, pídela y llama update_customer_info. Solo pide lo que no tengas.
-4. Llama get_cities y muestra las ciudades disponibles.
-5. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona. Luego pregunta: "¿Confirmamos el pedido con entrega a [dirección]?" — espera que el cliente confirme.
-6. Cuando el cliente diga que sí confirma: LLAMA create_order INMEDIATAMENTE. NO escribas nada antes de llamarla. NO inventes precios. NO copies ninguna plantilla. LLAMA LA HERRAMIENTA PRIMERO.
-7. SOLO DESPUÉS de que create_order retorne un resultado, escribe el resumen usando los valores EXACTOS que retornó la herramienta:
+   - NUNCA pases al paso 4 sin haber ofrecido los snacks primero.
+4. Verifica los DATOS YA GUARDADOS. Si no tienes el nombre del cliente (o dice "Desconocido"), pídelo y llama update_customer_info. Si no tienes la dirección de entrega, pídela. En cuanto el cliente la dé, llama update_customer_info con address INMEDIATAMENTE antes de continuar. Solo pide lo que no tengas.
+5. Llama get_cities y muestra las ciudades disponibles.
+6. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona. Luego pregunta: "¿Confirmamos el pedido con entrega a [dirección]?" — espera que el cliente confirme.
+7. Cuando el cliente diga que sí confirma: LLAMA create_order INMEDIATAMENTE. NO escribas nada antes de llamarla. NO inventes precios. NO copies ninguna plantilla. LLAMA LA HERRAMIENTA PRIMERO.
+8. SOLO DESPUÉS de que create_order retorne un resultado, escribe el resumen usando los valores EXACTOS que retornó la herramienta:
    - Usa el orderNumber real retornado — NUNCA escribas "[orderNumber]" literal
    - Usa el lineTotal, subtotal, shipping, total reales retornados — NUNCA los calcules tú
    - Si no llamaste create_order, NO escribas ningún resumen de pedido
@@ -553,7 +572,17 @@ Si NO hay que transferir, no incluyas ese JSON.`
     })
   }
 
-  messages.push({ role: 'user', content: userMessage })
+  if (mediaUrl) {
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: mediaUrl, detail: 'auto' } },
+        { type: 'text', text: userMessage || 'El cliente envió esta imagen.' },
+      ],
+    })
+  } else {
+    messages.push({ role: 'user', content: userMessage })
+  }
 
   let response = await getOpenAI().chat.completions.create({
     model,

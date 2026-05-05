@@ -4,7 +4,7 @@ import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead } from '@/lib/whatsapp'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppMediaAsBase64 } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
@@ -16,6 +16,12 @@ async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
   if (!room.petType) {
     if (/\b(perro|perrita|cachorro|can)\b/i.test(text)) update.petType = 'Perro'
     else if (/\b(gato|gatita|gatito|felino)\b/i.test(text)) update.petType = 'Gato'
+  }
+
+  // Extract pet name: capitalized word(s) at start of message before "tiene", "pesa", "es" or a comma
+  if (!room.petName) {
+    const nameMatch = text.match(/^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{1,20}(?:\s[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{1,20})?)(?:\s*,|\s+tiene|\s+pesa|\s+es\s)/i)
+    if (nameMatch) update.petName = nameMatch[1]
   }
 
   const ageMatch = text.match(/(\d+)\s*a[ñn]os?/i)
@@ -64,6 +70,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ status: 'ok' }, { status: 200 })
 }
 
+const UNSUPPORTED_MEDIA_MSG = 'Lo siento, por el momento no puedo procesar este tipo de mensaje. ¿Podrías escribirme en texto lo que necesitas? 😊'
+
 async function processMessage(parsed: {
   from: string
   name: string
@@ -71,6 +79,9 @@ async function processMessage(parsed: {
   messageId: string
   timestamp: string
   channel: ChannelType
+  mediaType?: 'image' | 'audio' | 'video'
+  mediaId?: string
+  mediaUrl?: string
 }) {
   // Mark as read (WhatsApp only — Messenger/Instagram mark read via different API)
   if (parsed.channel === 'whatsapp') markWhatsAppMessageRead(parsed.messageId)
@@ -104,12 +115,21 @@ async function processMessage(parsed: {
     await room.save()
   }
 
+  const inboundContent = parsed.mediaType
+    ? parsed.mediaType === 'image'
+      ? `[Imagen${parsed.text ? `: ${parsed.text}` : ''}]`
+      : parsed.mediaType === 'audio'
+        ? '[Audio]'
+        : '[Video]'
+    : parsed.text
+
   await Message.create({
     roomId: room._id,
     direction: 'inbound',
     sender: 'user',
-    content: parsed.text,
+    content: inboundContent,
     waMessageId: parsed.messageId,
+    mediaType: parsed.mediaType,
     timestamp: new Date(),
   })
 
@@ -125,6 +145,33 @@ async function processMessage(parsed: {
   }
 
   if (room.status !== 'bot') return
+
+  // Audio/video: respuesta canned, no pasa al agente
+  if (parsed.mediaType === 'audio' || parsed.mediaType === 'video') {
+    const waId = await sendChannelMessage(parsed.channel, parsed.from, UNSUPPORTED_MEDIA_MSG)
+    await Message.create({
+      roomId: room._id,
+      direction: 'outbound',
+      sender: 'bot',
+      content: UNSUPPORTED_MEDIA_MSG,
+      waMessageId: waId ?? undefined,
+      timestamp: new Date(),
+    })
+    room.lastMessage = UNSUPPORTED_MEDIA_MSG
+    room.lastMessageAt = new Date()
+    await room.save()
+    return
+  }
+
+  // Imagen: obtener base64 para GPT-4o Vision
+  let imageMediaUrl: string | undefined
+  if (parsed.mediaType === 'image') {
+    if (parsed.mediaId) {
+      imageMediaUrl = (await getWhatsAppMediaAsBase64(parsed.mediaId)) ?? undefined
+    } else if (parsed.mediaUrl) {
+      imageMediaUrl = parsed.mediaUrl
+    }
+  }
 
   let config = await AgentConfig.findOne()
   if (!config) config = await AgentConfig.create({ transferRules: DEFAULT_TRANSFER_RULES })
@@ -160,7 +207,7 @@ async function processMessage(parsed: {
   }
 
   const agentResponse = await runAgent(
-    parsed.text,
+    parsed.text || (parsed.mediaType === 'image' ? 'El cliente envió una imagen.' : ''),
     history.map((m) => ({
       _id: m._id.toString(),
       roomId: m.roomId.toString(),
@@ -178,7 +225,8 @@ async function processMessage(parsed: {
     config.temperature,
     room.contextSummary ?? '',
     parsed.from,
-    roomData
+    roomData,
+    imageMediaUrl
   )
 
   const { cleanText } = extractImageUrls(agentResponse.text)

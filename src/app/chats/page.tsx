@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback } from 'react'
 import Sidebar from '@/components/Sidebar'
 import ConversationList from '@/components/ConversationList'
 import ChatWindow from '@/components/ChatWindow'
-import type { IConversation, ConversationStatus } from '@/types'
+import type { IRoom, ConversationStatus } from '@/types'
 
 export default function ChatsPage() {
-  const [conversations, setConversations] = useState<IConversation[]>([])
+  const [conversations, setConversations] = useState<IRoom[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filter, setFilter] = useState<ConversationStatus | 'all'>('all')
   const [search, setSearch] = useState('')
