@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/webhook']
 
 export function proxy(req: NextRequest) {
+  // Set BYPASS_AUTH=true in Vercel env vars to disable login temporarily (e.g. for Meta review)
+  if (process.env.BYPASS_AUTH === 'true') return NextResponse.next()
+
   const { pathname } = req.nextUrl
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p))
