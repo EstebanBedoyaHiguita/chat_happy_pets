@@ -172,6 +172,15 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
+        // Hard block: name is mandatory before creating any order
+        const customerName = roomData?.name ?? ''
+        if (!customerName || customerName === 'Desconocido') {
+          return JSON.stringify({
+            status: 'error',
+            instruction: 'NO puedes crear el pedido todavía. DEBES preguntarle al cliente su nombre primero. Pregúntale: "Antes de confirmar, ¿me puedes dar tu nombre?" y espera su respuesta. Llama update_customer_info con el nombre antes de intentar create_order de nuevo.',
+          })
+        }
+
         const [citiesRaw, freshProductsRaw] = await Promise.allSettled([
           getCities(),
           getProducts(),
@@ -531,7 +540,7 @@ FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
    - NUNCA pases al paso 4 sin haber ofrecido los snacks primero.
 4. ⚠️ DATOS OBLIGATORIOS — NO PUEDES AVANZAR SIN ESTOS:
    a) NOMBRE DEL CLIENTE: si no lo tienes (o dice "Desconocido"), es OBLIGATORIO pedirlo AHORA. No puedes continuar al paso 5 sin el nombre. Cuando el cliente lo dé, llama update_customer_info con name inmediatamente.
-   b) DIRECCIÓN: si no la tienes, pídela. Cuando el cliente la dé, llama update_customer_info con address inmediatamente.
+   b) DIRECCIÓN: si no la tienes, pídela. Cuando el cliente la dé, pregunta siempre: "¿Tienes número de apartamento o alguna indicación adicional para la entrega? 🏠" — si el cliente dice que sí, agrégalo a la dirección. Si dice que no, continúa. Luego llama update_customer_info con la dirección completa.
    Pide primero el nombre, luego la dirección. Una pregunta a la vez.
 5. Llama get_cities y muestra las ciudades disponibles.
 6. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona. Luego pregunta: "¿Confirmamos el pedido con entrega a [dirección]?" — espera que el cliente confirme.
