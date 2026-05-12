@@ -149,14 +149,15 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     setSelectedTemplate(id)
     const tpl = templates.find((t) => t._id === id)
     if (!tpl) { setTemplateVars([]); return }
-    // Detect variable count from bodyText — handles {{1}} and {1} formats
-    const matches = tpl.bodyText?.match(/\{+(\d+)\}+/g) ?? []
-    const maxFromBody = matches.reduce((max: number, m: string) => {
-      const n = parseInt(m.replace(/[{}]/g, ''), 10)
-      return isNaN(n) ? max : Math.max(max, n)
-    }, 0)
-    const maxFromVars = Array.isArray(tpl.variables) ? tpl.variables.length : 0
-    setTemplateVars(Array(Math.max(maxFromBody, maxFromVars)).fill(''))
+    let count = Array.isArray(tpl.variables) ? tpl.variables.length : 0
+    if (count === 0 && tpl.bodyText) {
+      const nums = new Set<number>()
+      let m: RegExpExecArray | null
+      const re = /\{\{(\d+)\}\}/g
+      while ((m = re.exec(tpl.bodyText)) !== null) nums.add(Number(m[1]))
+      count = nums.size
+    }
+    setTemplateVars(Array(count).fill(''))
   }
 
   async function handleReopen(e: React.FormEvent) {
@@ -405,40 +406,26 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
                   ))}
                 </div>
 
-                {(() => {
-                  if (!selectedTemplate) return null
-                  const tpl = templates.find((t) => t._id === selectedTemplate)
-                  if (!tpl) return null
-                  const varCount = Math.max(
-                    (tpl.bodyText?.match(/\{+\d+\}+/g) ?? []).length,
-                    Array.isArray(tpl.variables) ? tpl.variables.length : 0,
-                    templateVars.length
-                  )
-                  if (varCount === 0) return null
-                  return (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-gray-400 text-xs font-medium">Completa las variables:</p>
-                      {Array.from({ length: varCount }, (_, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <span className="text-gray-500 text-xs w-16 flex-shrink-0">{`{{${i + 1}}}`}</span>
-                          <input
-                            value={templateVars[i] ?? ''}
-                            onChange={(e) => {
-                              setTemplateVars((prev) => {
-                                const updated = [...prev]
-                                while (updated.length <= i) updated.push('')
-                                updated[i] = e.target.value
-                                return updated
-                              })
-                            }}
-                            placeholder={tpl.variables?.[i] ?? `Variable ${i + 1}`}
-                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}
+                {selectedTemplate && templateVars.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-gray-400 text-xs font-medium">Completa las variables:</p>
+                    {templateVars.map((v, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-gray-500 text-xs w-16 flex-shrink-0">{`{{${i + 1}}}`}</span>
+                        <input
+                          value={v}
+                          onChange={(e) => {
+                            const updated = [...templateVars]
+                            updated[i] = e.target.value
+                            setTemplateVars(updated)
+                          }}
+                          placeholder={templates.find((t) => t._id === selectedTemplate)?.variables[i] ?? `Variable ${i + 1}`}
+                          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {reopenError && (
                   <p className="text-red-400 text-xs bg-red-900/30 border border-red-800 rounded-lg px-3 py-2">{reopenError}</p>

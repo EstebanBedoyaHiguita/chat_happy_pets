@@ -32,12 +32,9 @@ const CATEGORY_LABELS: Record<TemplateCategory, string> = {
   AUTHENTICATION: 'Autenticación',
 }
 
-const VAR_PLACEHOLDER = /\{\{(\d+)\}\}/g
-
 function extractVariables(text: string): string[] {
-  const nums = new Set<number>()
-  let m
-  while ((m = VAR_PLACEHOLDER.exec(text)) !== null) nums.add(Number(m[1]))
+  const matches = text.match(/\{\{(\d+)\}\}/g) ?? []
+  const nums = new Set(matches.map((m) => parseInt(m.replace(/[{}]/g, ''), 10)).filter((n) => !isNaN(n)))
   return Array.from(nums).sort((a, b) => a - b).map((n) => `Variable ${n}`)
 }
 
