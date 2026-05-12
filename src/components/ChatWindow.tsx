@@ -1,11 +1,11 @@
 ﻿'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { IConversation, IMessage, ICloseReason } from '@/types'
+import type { IRoom, IMessage, ICloseReason } from '@/types'
 import MessageBubble from './MessageBubble'
 
 interface Props {
-  conversation: IConversation
+  conversation: IRoom
   onStatusChange: () => void
 }
 
@@ -148,7 +148,12 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   function handleSelectTemplate(id: string) {
     setSelectedTemplate(id)
     const tpl = templates.find((t) => t._id === id)
-    setTemplateVars(tpl ? Array(tpl.variables.length).fill('') : [])
+    if (!tpl) { setTemplateVars([]); return }
+    // Detect variable count from bodyText ({{1}}, {{2}}, etc.) as fallback when variables array is empty
+    const matches = tpl.bodyText.match(/\{\{(\d+)\}\}/g) ?? []
+    const maxVar = matches.reduce((max, m) => Math.max(max, parseInt(m.replace(/\{\{|\}\}/g, ''))), 0)
+    const count = Math.max(maxVar, tpl.variables.length)
+    setTemplateVars(Array(count).fill(''))
   }
 
   async function handleReopen(e: React.FormEvent) {
