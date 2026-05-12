@@ -149,11 +149,14 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     setSelectedTemplate(id)
     const tpl = templates.find((t) => t._id === id)
     if (!tpl) { setTemplateVars([]); return }
-    // Detect variable count from bodyText ({{1}}, {{2}}, etc.) as fallback when variables array is empty
-    const matches = tpl.bodyText.match(/\{\{(\d+)\}\}/g) ?? []
-    const maxVar = matches.reduce((max, m) => Math.max(max, parseInt(m.replace(/\{\{|\}\}/g, ''))), 0)
-    const count = Math.max(maxVar, tpl.variables.length)
-    setTemplateVars(Array(count).fill(''))
+    // Detect variable count from bodyText — handles {{1}} and {1} formats
+    const matches = tpl.bodyText?.match(/\{+(\d+)\}+/g) ?? []
+    const maxFromBody = matches.reduce((max: number, m: string) => {
+      const n = parseInt(m.replace(/[{}]/g, ''), 10)
+      return isNaN(n) ? max : Math.max(max, n)
+    }, 0)
+    const maxFromVars = Array.isArray(tpl.variables) ? tpl.variables.length : 0
+    setTemplateVars(Array(Math.max(maxFromBody, maxFromVars)).fill(''))
   }
 
   async function handleReopen(e: React.FormEvent) {
