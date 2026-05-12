@@ -41,7 +41,11 @@ export async function createMetaTemplate(params: {
     }
   )
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error?.message ?? `Meta API error ${res.status}`)
+  if (!res.ok) {
+    const err = data.error
+    const detail = err?.error_data?.details ?? err?.error_user_msg ?? err?.message ?? `Meta API error ${res.status}`
+    throw new Error(detail)
+  }
   return { id: data.id, status: data.status }
 }
 
