@@ -451,6 +451,39 @@ export interface RoomKnownData {
   address?: string
 }
 
+function getDeliveryDate(): string {
+  const COLOMBIA_TZ = 'America/Bogota'
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: COLOMBIA_TZ }))
+  const delivery = new Date(now)
+  delivery.setDate(delivery.getDate() + 1)
+
+  // Colombian public holidays 2026 and 2027
+  const holidays = new Set([
+    '2026-01-01','2026-01-12','2026-03-23','2026-04-02','2026-04-03',
+    '2026-05-01','2026-05-18','2026-06-08','2026-06-15','2026-06-29',
+    '2026-07-20','2026-08-07','2026-08-17','2026-10-12','2026-11-02',
+    '2026-11-16','2026-12-08','2026-12-25',
+    '2027-01-01','2027-01-11','2027-03-22','2027-03-25','2027-03-26',
+    '2027-05-01','2027-05-10','2027-05-31','2027-06-07','2027-06-28',
+    '2027-07-20','2027-08-07','2027-08-16','2027-10-18','2027-11-01',
+    '2027-11-15','2027-12-08','2027-12-25',
+  ])
+
+  const toDateStr = (d: Date) =>
+    d.toLocaleDateString('en-CA', { timeZone: COLOMBIA_TZ }) // YYYY-MM-DD
+
+  for (let i = 0; i < 14; i++) {
+    const dow = new Date(delivery.toLocaleString('en-US', { timeZone: COLOMBIA_TZ })).getDay()
+    if (dow !== 0 && !holidays.has(toDateStr(delivery))) break
+    delivery.setDate(delivery.getDate() + 1)
+  }
+
+  const dayNames = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado']
+  const monthNames = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
+  const local = new Date(delivery.toLocaleString('en-US', { timeZone: COLOMBIA_TZ }))
+  return `${dayNames[local.getDay()]} ${local.getDate()} de ${monthNames[local.getMonth()]}`
+}
+
 export async function runAgent(
   userMessage: string,
   conversationHistory: IMessage[],
@@ -577,7 +610,11 @@ Realiza tu pago por transferencia o consignación a:
 
 Cuando realices el pago, envíanos el comprobante por este mismo chat. ¡Gracias! 🐾
 
-Después del mensaje de pago, envía SIEMPRE este mensaje de despedida (adapta el nombre de la mascota con el que tengas guardado, si no tienes usa "tu peludo"):
+Después del mensaje de pago, envía SIEMPRE este mensaje de entrega:
+
+"📦 Tu pedido llegará el ${getDeliveryDate()}. Recuerda que no realizamos entregas los domingos ni días festivos."
+
+Luego envía SIEMPRE este mensaje de despedida (adapta el nombre de la mascota con el que tengas guardado, si no tienes usa "tu peludo"):
 
 "¡Gracias por confiar en Happy Pets Family para el cuidado de [nombre mascota] 🐾❤️ Para nosotros es un honor acompañarlos en este camino hacia una vida más sana y natural.
 
