@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
+import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
 import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppMediaAsBase64 } from '@/lib/whatsapp'
@@ -32,6 +33,11 @@ async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
 
   if (Object.keys(update).length > 0) {
     await Room.updateOne({ _id: room._id }, { $set: update })
+    await Customer.findOneAndUpdate(
+      { waId: room.waId },
+      { $set: update },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    )
     Object.assign(room, update)
   }
 }
@@ -106,6 +112,11 @@ async function processMessage(parsed: {
       lastMessageAt: new Date(),
       windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     })
+    await Customer.findOneAndUpdate(
+      { waId: roomKey },
+      { $setOnInsert: { name: parsed.name, phone: parsed.from } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    )
   } else {
     room.lastMessage = parsed.text
     room.lastMessageAt = new Date()

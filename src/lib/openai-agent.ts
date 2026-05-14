@@ -357,6 +357,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
       case 'update_customer_info': {
         if (waId) {
           const { Room } = await import('./models/Room')
+          const { Customer } = await import('./models/Customer')
           const update: Record<string, string> = {}
           const fields = ['name','petType','petName','petAge','petWeight','pet2Type','pet2Name','pet2Age','pet2Weight','pet3Type','pet3Name','pet3Age','pet3Weight','address']
           for (const f of fields) {
@@ -364,6 +365,11 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           }
           if (Object.keys(update).length > 0) {
             await Room.updateOne({ waId }, { $set: update })
+            await Customer.findOneAndUpdate(
+              { waId },
+              { $set: update },
+              { upsert: true, new: true, setDefaultsOnInsert: true }
+            )
           }
         }
         result = { success: true }
