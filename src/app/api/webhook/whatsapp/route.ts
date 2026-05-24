@@ -341,7 +341,10 @@ async function processMessage(parsed: {
 
   if (agentResponse.transfer) {
     room.status = 'human'
-    await sendChannelMessage(parsed.channel, parsed.from, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
+    const isPaymentReceipt = agentResponse.transferReason?.toLowerCase().includes('comprobante')
+    if (!isPaymentReceipt) {
+      await sendChannelMessage(parsed.channel, parsed.from, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
+    }
   }
 
   if (agentResponse.orderCreated) {
