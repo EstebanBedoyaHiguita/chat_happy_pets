@@ -268,6 +268,21 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         const subtotal = items.reduce((sum, i) => sum + i.lineTotal, 0)
         const total = subtotal + shipping
 
+        // Always include city in the stored address
+        const rawAddress = (args.address as string) ?? ''
+        const cityArg = (args.cityName as string) ?? ''
+        const addressWithCity = cityArg && !rawAddress.toLowerCase().includes(cityArg.toLowerCase())
+          ? `${rawAddress}, ${cityArg}`
+          : rawAddress
+
+        // Persist the full address (with city) to room and customer
+        if (waId && addressWithCity) {
+          const { Room } = await import('./models/Room')
+          const { Customer } = await import('./models/Customer')
+          await Room.updateOne({ waId }, { $set: { address: addressWithCity } })
+          await Customer.findOneAndUpdate({ waId }, { $set: { address: addressWithCity } }, { upsert: true, new: true, setDefaultsOnInsert: true })
+        }
+
         const { BotOrder } = await import('./models/BotOrder')
         const { connectDB } = await import('./mongodb')
         await connectDB()
@@ -283,8 +298,8 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           shipping,
           total,
           shippingAddress: {
-            address: args.address as string,
-            city: args.cityName as string,
+            address: addressWithCity,
+            city: cityArg,
             department: args.department as string,
             notes: (args.notes as string) ?? '',
           },
@@ -324,7 +339,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           salmon:   barfQty('salmon') || barfQty('salmón'),
           conejo:   barfQty('conejo'),
           snacks:   snacksText,
-          observaciones: [args.address, args.notes].filter(Boolean).join(' | '),
+          observaciones: [addressWithCity, args.notes].filter(Boolean).join(' | '),
           orderNumber,
         }
 
@@ -601,7 +616,7 @@ FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
      🐔 X paquete(s) Dieta Barf Pollo
      🍎 X paquete(s) Dieta Barf Pollo con Frutas
      ¿Es correcto? 😊"
-   - ESPERA que el cliente confirme el resumen antes de continuar.
+   - ⚠️ En este mensaje SOLO va el resumen y "¿Es correcto?". NADA MÁS. No preguntes por apartamento, dirección, nombre ni nada adicional. ESPERA que el cliente confirme antes de continuar.
 3. ⚠️ UPSELL DE SNACKS — OBLIGATORIO, NO LO SALTES: Cuando el cliente confirme los productos BARF, debes ofrecer snacks. Esto aplica SIEMPRE, incluso si ya tienes la dirección (porque la recopiló un asesor humano antes). Revisa el historial: si en ningún mensaje previo (tuyo o del asesor) se ofreció snacks, OFRÉCELOS AHORA antes de avanzar al paso 4:
 "¿Le gustaría agregar algún snack o premio para [nombre mascota]? 🎁 Tenemos:
 🥩 Deshidratados
@@ -615,7 +630,7 @@ FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
 4. ⚠️ DATOS OBLIGATORIOS — NO PUEDES AVANZAR SIN ESTOS:
    a) NOMBRE DEL CLIENTE: si no lo tienes (o dice "Desconocido"), es OBLIGATORIO pedirlo AHORA. No puedes continuar al paso 5 sin el nombre. Cuando el cliente lo dé, llama update_customer_info con name inmediatamente.
    b) DIRECCIÓN: si no la tienes, pídela. Cuando el cliente la dé, confírmala: "¿Tu dirección de entrega es [dirección]?" — espera que el cliente confirme. Cuando el cliente confirme (diga "sí", "correcto", o repita la dirección), SIEMPRE pregunta a continuación: "¿Tienes número de apartamento o alguna indicación adicional para la entrega? 🏠" — si el cliente da un dato adicional, agrégalo a la dirección completa. Si dice "no" o "no tengo", continúa. Esta pregunta del apartamento es OBLIGATORIA después de confirmar la dirección, no la omitas nunca.
-   Si ya tienes la dirección (recopilada por un asesor humano), confirma que es correcta y pregunta igualmente por el apartamento antes de continuar.
+   Si ya tienes la dirección (recopilada por un asesor humano), confirma que es correcta y pregunta igualmente por el apartamento. Esta pregunta del apartamento va en un mensaje SEPARADO, DESPUÉS de haber completado el paso 3 (snacks). NUNCA la incluyas en el mismo mensaje que el resumen del pedido.
    Pide primero el nombre, luego la dirección. Una pregunta a la vez.
 5. Llama get_cities y muestra las ciudades disponibles.
 6. Cuando el cliente elija la ciudad, muestra el costo de envío de esa zona. Llama update_customer_info con la dirección completa incluyendo la ciudad: address = "[dirección que ya tienes], [ciudad elegida]". Luego pregunta: "¿Confirmamos el pedido con entrega a [dirección], [ciudad]?" — espera que el cliente confirme.
