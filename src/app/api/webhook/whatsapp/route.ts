@@ -72,7 +72,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (!parsed) return NextResponse.json({ status: 'ignored' }, { status: 200 })
-  waitUntil(processMessage(parsed).catch(console.error))
+  const baseUrl = `${req.nextUrl.protocol}//${req.nextUrl.host}`
+  waitUntil(processMessage(parsed, baseUrl).catch(console.error))
   return NextResponse.json({ status: 'ok' }, { status: 200 })
 }
 
@@ -88,7 +89,7 @@ async function processMessage(parsed: {
   mediaType?: 'image' | 'audio' | 'video'
   mediaId?: string
   mediaUrl?: string
-}) {
+}, baseUrl = '') {
   // Mark as read (WhatsApp only — Messenger/Instagram mark read via different API)
   if (parsed.channel === 'whatsapp') markWhatsAppMessageRead(parsed.messageId)
 
@@ -135,7 +136,7 @@ async function processMessage(parsed: {
   if (parsed.mediaType === 'image') {
     if (parsed.mediaId) {
       mediaUrl = `/api/media/${parsed.mediaId}`
-      visionUrl = (await getWhatsAppMediaAsBase64(parsed.mediaId)) ?? undefined
+      visionUrl = baseUrl ? `${baseUrl}/api/media/${parsed.mediaId}` : undefined
     } else if (parsed.mediaUrl) {
       mediaUrl = parsed.mediaUrl
       visionUrl = parsed.mediaUrl
