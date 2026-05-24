@@ -151,7 +151,7 @@ No esperes a tener todos los datos. Llámala con cada dato nuevo por separado si
   },
 ]
 
-async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}): Promise<string> {
+async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}, pendingSteps: string[] = []): Promise<string> {
   console.log('[Tool call]', name, JSON.stringify(args))
   try {
     let result
@@ -172,6 +172,13 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
+        // Hard block: pending steps must be completed before creating any order
+        if (pendingSteps.length > 0) {
+          return JSON.stringify({
+            status: 'error',
+            instruction: `NO puedes crear el pedido todavía. Hay pasos OBLIGATORIOS que debes completar PRIMERO en este orden:\n${pendingSteps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nCompleta estos pasos ahora. NO llames create_order hasta haberlos completado.`,
+          })
+        }
         // Hard block: name is mandatory before creating any order
         const customerName = roomData?.name ?? ''
         if (!customerName || customerName === 'Desconocido') {
@@ -727,7 +734,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
     const toolCalls = ((assistantMessage.tool_calls ?? []) as FnCall[]).filter((tc) => tc.type === 'function')
     for (const toolCall of toolCalls) {
       const args = JSON.parse(toolCall.function.arguments || '{}')
-      const result = await executeTool(toolCall.function.name, args, waId, collectedProducts, roomData)
+      const result = await executeTool(toolCall.function.name, args, waId, collectedProducts, roomData, pendingSteps ?? [])
 
       // Detect successful order creation
       if (toolCall.function.name === 'create_order') {
