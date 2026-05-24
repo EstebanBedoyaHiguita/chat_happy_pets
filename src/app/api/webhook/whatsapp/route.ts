@@ -104,13 +104,13 @@ async function processMessage(parsed: {
   const roomKey = parsed.channel === 'whatsapp' ? parsed.from : `${parsed.channel}:${parsed.from}`
   let room = await Room.findOne({ waId: roomKey })
   const adFields = parsed.referral ? {
-    adSource: parsed.referral.sourceType,
+    adSource: parsed.referral.sourceType ?? 'ad',
     adId: parsed.referral.sourceId,
     adTitle: parsed.referral.adTitle ?? parsed.referral.headline,
     adBody: parsed.referral.body,
     ctwaClid: parsed.referral.ctwaClid,
     sourceUrl: parsed.referral.sourceUrl,
-  } : {}
+  } : { adSource: 'Organic' }
 
   if (!room) {
     room = await Room.create({
