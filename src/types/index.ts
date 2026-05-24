@@ -47,6 +47,8 @@ export interface IMessage {
   sender: MessageSender
   content: string
   waMessageId?: string
+  mediaType?: 'image' | 'audio' | 'video'
+  mediaUrl?: string
   timestamp: string
   createdAt: string
 }

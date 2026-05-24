@@ -5,8 +5,8 @@ import { Room } from '@/lib/models/Room'
 import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppMediaAsBase64 } from '@/lib/whatsapp'
-import { runAgent, summarizeHistory, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppMediaAsBase64, getWhatsAppAudioBuffer } from '@/lib/whatsapp'
+import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
 import type { Document } from 'mongoose'
@@ -126,13 +126,32 @@ async function processMessage(parsed: {
     await room.save()
   }
 
-  const inboundContent = parsed.mediaType
-    ? parsed.mediaType === 'image'
-      ? `[Imagen${parsed.text ? `: ${parsed.text}` : ''}]`
-      : parsed.mediaType === 'audio'
-        ? '[Audio]'
-        : '[Video]'
-    : parsed.text
+  // Fetch image base64 and transcribe audio before saving message
+  let imageMediaUrl: string | undefined
+  let audioTranscription: string | undefined
+
+  if (parsed.mediaType === 'image') {
+    if (parsed.mediaId) {
+      imageMediaUrl = (await getWhatsAppMediaAsBase64(parsed.mediaId)) ?? undefined
+    } else if (parsed.mediaUrl) {
+      imageMediaUrl = parsed.mediaUrl
+    }
+  }
+
+  if (parsed.mediaType === 'audio' && parsed.mediaId) {
+    const audioData = await getWhatsAppAudioBuffer(parsed.mediaId)
+    if (audioData) {
+      audioTranscription = (await transcribeAudio(audioData.buffer, audioData.mimeType)) ?? undefined
+    }
+  }
+
+  const inboundContent = parsed.mediaType === 'image'
+    ? `[Imagen${parsed.text ? `: ${parsed.text}` : ''}]`
+    : parsed.mediaType === 'audio'
+      ? audioTranscription ?? '[Audio]'
+      : parsed.mediaType === 'video'
+        ? '[Video]'
+        : parsed.text
 
   await Message.create({
     roomId: room._id,
@@ -141,10 +160,12 @@ async function processMessage(parsed: {
     content: inboundContent,
     waMessageId: parsed.messageId,
     mediaType: parsed.mediaType,
+    mediaUrl: imageMediaUrl,
     timestamp: new Date(),
   })
 
-  await autoExtractAndSave(room, parsed.text)
+  const textForAgent = parsed.mediaType === 'audio' ? (audioTranscription ?? '') : (parsed.text ?? '')
+  await autoExtractAndSave(room, textForAgent)
 
   if (room.status === 'closed') {
     room.status = 'bot'
@@ -157,8 +178,8 @@ async function processMessage(parsed: {
 
   if (room.status !== 'bot') return
 
-  // Audio/video: respuesta canned, no pasa al agente
-  if (parsed.mediaType === 'audio' || parsed.mediaType === 'video') {
+  // Video: canned response (can't transcribe video)
+  if (parsed.mediaType === 'video') {
     const waId = await sendChannelMessage(parsed.channel, parsed.from, UNSUPPORTED_MEDIA_MSG)
     await Message.create({
       roomId: room._id,
@@ -174,14 +195,21 @@ async function processMessage(parsed: {
     return
   }
 
-  // Imagen: obtener base64 para GPT-4o Vision
-  let imageMediaUrl: string | undefined
-  if (parsed.mediaType === 'image') {
-    if (parsed.mediaId) {
-      imageMediaUrl = (await getWhatsAppMediaAsBase64(parsed.mediaId)) ?? undefined
-    } else if (parsed.mediaUrl) {
-      imageMediaUrl = parsed.mediaUrl
-    }
+  // Audio without transcription: canned response
+  if (parsed.mediaType === 'audio' && !audioTranscription) {
+    const waId = await sendChannelMessage(parsed.channel, parsed.from, UNSUPPORTED_MEDIA_MSG)
+    await Message.create({
+      roomId: room._id,
+      direction: 'outbound',
+      sender: 'bot',
+      content: UNSUPPORTED_MEDIA_MSG,
+      waMessageId: waId ?? undefined,
+      timestamp: new Date(),
+    })
+    room.lastMessage = UNSUPPORTED_MEDIA_MSG
+    room.lastMessageAt = new Date()
+    await room.save()
+    return
   }
 
   let config = await AgentConfig.findOne()
@@ -218,7 +246,7 @@ async function processMessage(parsed: {
   }
 
   const agentResponse = await runAgent(
-    parsed.text || (parsed.mediaType === 'image' ? 'El cliente envió una imagen.' : ''),
+    audioTranscription || parsed.text || (parsed.mediaType === 'image' ? 'El cliente envió una imagen.' : ''),
     history.map((m) => ({
       _id: m._id.toString(),
       roomId: m.roomId.toString(),

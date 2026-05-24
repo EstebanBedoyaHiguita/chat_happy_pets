@@ -82,6 +82,23 @@ export async function getWhatsAppMediaAsBase64(mediaId: string): Promise<string 
   return `data:${mimeType};base64,${base64}`
 }
 
+export async function getWhatsAppAudioBuffer(mediaId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  if (!ACCESS_TOKEN) return null
+  const metaRes = await fetch(`https://graph.facebook.com/${API_VERSION}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  })
+  if (!metaRes.ok) return null
+  const metaData = await metaRes.json()
+  const downloadUrl = metaData.url as string
+  const mimeType = (metaData.mime_type as string) ?? 'audio/ogg'
+  const mediaRes = await fetch(downloadUrl, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  })
+  if (!mediaRes.ok) return null
+  const buffer = Buffer.from(await mediaRes.arrayBuffer())
+  return { buffer, mimeType }
+}
+
 export function extractImageUrls(text: string): { cleanText: string; imageUrls: string[] } {
   const imageUrls: string[] = []
 
@@ -189,7 +206,8 @@ export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhat
     }
 
     if (message.type === 'audio') {
-      return { ...base, text: '', mediaType: 'audio' }
+      const audio = message.audio as Record<string, unknown>
+      return { ...base, text: '', mediaType: 'audio', mediaId: audio?.id as string }
     }
 
     if (message.type === 'video') {

@@ -8,6 +8,7 @@ export interface MessageDoc extends Document {
   content: string
   waMessageId?: string
   mediaType?: 'image' | 'audio' | 'video'
+  mediaUrl?: string
   timestamp: Date
 }
 
@@ -32,6 +33,7 @@ const MessageSchema = new Schema<MessageDoc>(
     content: { type: String, required: true },
     waMessageId: { type: String },
     mediaType: { type: String, enum: ['image', 'audio', 'video'] },
+    mediaUrl: { type: String },
     timestamp: { type: Date, default: Date.now },
   },
   { timestamps: true }

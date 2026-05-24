@@ -68,7 +68,9 @@ export default function MessageBubble({ message }: Props) {
         )}
 
         <div
-          className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
+          className={`rounded-2xl text-sm leading-relaxed ${
+            message.mediaType === 'image' && message.mediaUrl ? 'overflow-hidden p-0' : 'px-4 py-2.5 whitespace-pre-wrap break-words'
+          } ${
             isInbound
               ? 'bg-gray-700 text-white rounded-tl-sm'
               : message.sender === 'bot'
@@ -76,7 +78,21 @@ export default function MessageBubble({ message }: Props) {
               : 'bg-green-700 text-white rounded-tr-sm'
           }`}
         >
-          {renderContent(message.content)}
+          {message.mediaType === 'image' && message.mediaUrl ? (
+            <div>
+              <img
+                src={message.mediaUrl}
+                alt="Imagen del cliente"
+                className="max-w-full rounded-2xl"
+                style={{ maxHeight: 320, display: 'block' }}
+              />
+              {message.content && message.content !== '[Imagen]' && (
+                <p className="px-3 py-2 text-sm">{message.content.replace(/^\[Imagen:\s*/, '').replace(/\]$/, '')}</p>
+              )}
+            </div>
+          ) : (
+            renderContent(message.content)
+          )}
         </div>
 
         <span className="text-xs text-gray-600 mt-0.5 px-1">

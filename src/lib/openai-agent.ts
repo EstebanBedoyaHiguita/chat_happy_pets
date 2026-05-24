@@ -388,6 +388,22 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 }
 
 
+export async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string | null> {
+  try {
+    const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : mimeType.includes('mpeg') ? 'mp3' : 'ogg'
+    const file = new File([buffer], `audio.${ext}`, { type: mimeType })
+    const result = await getOpenAI().audio.transcriptions.create({
+      file,
+      model: 'whisper-1',
+      language: 'es',
+    })
+    return result.text ?? null
+  } catch (err) {
+    console.error('[Whisper error]', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 export async function summarizeHistory(messages: IMessage[]): Promise<string> {
   if (messages.length === 0) return ''
   const transcript = messages
