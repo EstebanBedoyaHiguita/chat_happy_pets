@@ -517,7 +517,8 @@ export async function runAgent(
   contextSummary = '',
   waId = '',
   roomData: RoomKnownData = {},
-  mediaUrl?: string
+  mediaUrl?: string,
+  pendingSteps?: string[]
 ): Promise<AgentResponse> {
   const summarySection = contextSummary
     ? `\nCONTEXTO PREVIO DE ESTA CONVERSACIÓN (resumen):\n${contextSummary}\n`
@@ -641,7 +642,7 @@ Datos para transferencia:
 
 IMPORTANTE SOBRE PAGO CONTRA ENTREGA: Si el cliente pregunta por pago contra entrega, SIEMPRE confirma que sí es posible pero aclara que el pago debe ser por transferencia bancaria en el momento de recibir, nunca en efectivo.
 
-Después del mensaje de pago, envía SIEMPRE este mensaje de entrega:
+Después del mensaje de pago, envía SIEMPRE este mensaje de entrega EXACTAMENTE como aparece (no lo parafrasees, no escribas "mañana" ni otra fecha):
 
 "📦 Tu pedido llegará el ${getDeliveryDate()}. Recuerda que no realizamos entregas los domingos ni días festivos."
 
@@ -669,9 +670,9 @@ Si NO hay que transferir, no incluyas ese JSON.`
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt + summarySection + transferInstructions },
-    ...conversationHistory.slice(-12).map((m) => ({
+    ...conversationHistory.slice(-16).map((m) => ({
       role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: m.content,
+      content: m.sender === 'human' ? `[Asesor humano]: ${m.content}` : m.content,
     })),
   ]
 
@@ -680,6 +681,14 @@ Si NO hay que transferir, no incluyas ese JSON.`
     messages.push({
       role: 'system',
       content: `⚠️ DATOS YA GUARDADOS DEL CLIENTE — NO VOLVER A PREGUNTAR:\n${knownLines.join('\n')}\n\nEstos datos ya los tienes. No los pidas de nuevo. Úsalos cuando sean relevantes para personalizar la respuesta.`,
+    })
+  }
+
+  // Inject detected pending steps from the webhook (reliable state detection)
+  if (pendingSteps && pendingSteps.length > 0) {
+    messages.push({
+      role: 'system',
+      content: `⚠️ PASOS PENDIENTES DETECTADOS — DEBES COMPLETARLOS EN ESTE ORDEN ANTES DE CREAR EL PEDIDO:\n${pendingSteps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
     })
   }
 

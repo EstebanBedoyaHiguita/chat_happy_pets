@@ -5,7 +5,7 @@ import { Room } from '@/lib/models/Room'
 import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppMediaAsBase64, getWhatsAppAudioBuffer, type AdReferral } from '@/lib/whatsapp'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppAudioBuffer, type AdReferral } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
@@ -246,8 +246,23 @@ async function processMessage(parsed: {
 
   const history = await Message.find({ roomId: room._id })
     .sort({ timestamp: -1 })
-    .limit(10)
+    .limit(20)
     .then((msgs) => msgs.reverse())
+
+  // Detect pending flow steps so the agent doesn't skip them
+  const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
+  const allTexts = history.map(m => m.content.toLowerCase())
+  const barfDiscussed = allTexts.some(t => t.includes('barf') || t.includes('dieta') || t.includes('paquete') || t.includes('res') || t.includes('cordero') || t.includes('salmón') || t.includes('salmon'))
+  const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
+  const apartmentAsked = outboundTexts.some(t => t.includes('apartamento') || t.includes('apto') || t.includes('indicación adicional'))
+
+  const pendingSteps: string[] = []
+  if (barfDiscussed && !snacksOffered) {
+    pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Debes ofrecer los snacks AHORA antes de cualquier otro paso.')
+  }
+  if (room.address && !apartmentAsked) {
+    pendingSteps.push('PREGUNTAR APARTAMENTO: ya tienes la dirección del cliente pero nunca se preguntó por número de apartamento o indicaciones adicionales. Pregúntalo antes de continuar.')
+  }
 
   const roomData: RoomKnownData = {
     name: room.name,
@@ -286,7 +301,8 @@ async function processMessage(parsed: {
     room.contextSummary ?? '',
     parsed.from,
     roomData,
-    visionUrl
+    visionUrl,
+    pendingSteps.length > 0 ? pendingSteps : undefined
   )
 
   const { cleanText } = extractImageUrls(agentResponse.text)
