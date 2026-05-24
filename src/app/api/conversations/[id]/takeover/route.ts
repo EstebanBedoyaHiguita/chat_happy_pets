@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
+import { Message } from '@/lib/models/Message'
+import { AgentConfig } from '@/lib/models/AgentConfig'
 import { cookies } from 'next/headers'
+import { runAgent, RoomKnownData } from '@/lib/openai-agent'
+import { sendChannelMessage, sendChannelImage, extractImageUrls } from '@/lib/whatsapp'
+import { DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
+import type { AgentProduct } from '@/lib/openai-agent'
 
 export async function POST(
   req: NextRequest,
@@ -36,5 +43,126 @@ export async function DELETE(
   room.assignedTo = undefined
   await room.save()
 
+  // Activate bot immediately with the client's last message as context
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'https://chat-happy-pets.vercel.app'
+  waitUntil(resumeBot(id, baseUrl).catch(console.error))
+
   return NextResponse.json({ success: true, status: 'bot' })
+}
+
+async function resumeBot(roomId: string, baseUrl: string) {
+  await connectDB()
+
+  const room = await Room.findById(roomId)
+  if (!room || room.status !== 'bot') return
+
+  // Get last inbound message from the client
+  const lastInbound = await Message.findOne({ roomId: room._id, direction: 'inbound' }).sort({ timestamp: -1 })
+  if (!lastInbound) return
+
+  const history = await Message.find({ roomId: room._id })
+    .sort({ timestamp: -1 })
+    .limit(20)
+    .then((msgs) => msgs.reverse())
+
+  const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
+  const allTexts = history.map(m => m.content.toLowerCase())
+  const barfDiscussed = allTexts.some(t => t.includes('barf') || t.includes('dieta') || t.includes('paquete') || t.includes('res') || t.includes('cordero') || t.includes('salmón') || t.includes('salmon'))
+  const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
+
+  const pendingSteps: string[] = []
+  if (barfDiscussed && !snacksOffered) {
+    pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Cuando el cliente confirme el resumen del pedido ("sí, es correcto" o similar), lo PRIMERO que debes hacer es ofrecer snacks ANTES de pedir dirección, ciudad o cualquier otro dato.')
+  }
+
+  let config = await AgentConfig.findOne()
+  if (!config) config = await AgentConfig.create({ transferRules: DEFAULT_TRANSFER_RULES })
+
+  const roomData: RoomKnownData = {
+    name: room.name,
+    petName: room.petName || undefined,
+    petType: room.petType || undefined,
+    petAge: room.petAge || undefined,
+    petWeight: room.petWeight || undefined,
+    pet2Name: room.pet2Name || undefined,
+    pet2Type: room.pet2Type || undefined,
+    pet2Age: room.pet2Age || undefined,
+    pet2Weight: room.pet2Weight || undefined,
+    pet3Name: room.pet3Name || undefined,
+    pet3Type: room.pet3Type || undefined,
+    pet3Age: room.pet3Age || undefined,
+    pet3Weight: room.pet3Weight || undefined,
+    address: room.address || undefined,
+  }
+
+  const agentResponse = await runAgent(
+    lastInbound.content,
+    history.map((m) => ({
+      _id: m._id.toString(),
+      roomId: m.roomId.toString(),
+      conversationId: m.roomId.toString(),
+      direction: m.direction,
+      sender: m.sender,
+      content: m.content,
+      waMessageId: m.waMessageId,
+      timestamp: m.timestamp.toISOString(),
+      createdAt: m.createdAt?.toString() ?? '',
+    })),
+    config.systemPrompt,
+    config.transferRules,
+    config.aiModel,
+    config.temperature,
+    room.contextSummary ?? '',
+    room.waId,
+    roomData,
+    undefined,
+    pendingSteps.length > 0 ? pendingSteps : undefined
+  )
+
+  const { cleanText } = extractImageUrls(agentResponse.text)
+
+  if (agentResponse.products.length > 0) {
+    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 2)) {
+      const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
+      const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
+      let waMessageId: string | null = null
+      if (product.imageUrl) {
+        waMessageId = await sendChannelImage(room.channel, room.phone, product.imageUrl, caption)
+      } else {
+        waMessageId = await sendChannelMessage(room.channel, room.phone, caption)
+      }
+      await Message.create({
+        roomId: room._id,
+        direction: 'outbound',
+        sender: 'bot',
+        content,
+        waMessageId: waMessageId ?? undefined,
+        timestamp: new Date(),
+      })
+    }
+  } else {
+    const waMessageId = await sendChannelMessage(room.channel, room.phone, cleanText)
+    await Message.create({
+      roomId: room._id,
+      direction: 'outbound',
+      sender: 'bot',
+      content: cleanText,
+      waMessageId: waMessageId ?? undefined,
+      timestamp: new Date(),
+    })
+  }
+
+  room.lastMessage = agentResponse.text
+  room.lastMessageAt = new Date()
+
+  if (agentResponse.transfer) {
+    room.status = 'human'
+  }
+  if (agentResponse.orderCreated) {
+    room.status = 'closed'
+    room.closeReasonName = 'Pedido realizado'
+    room.closedBy = 'bot'
+  }
+
+  await room.save()
 }
