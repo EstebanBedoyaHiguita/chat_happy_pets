@@ -69,7 +69,9 @@ export default function MessageBubble({ message }: Props) {
 
         <div
           className={`rounded-2xl text-sm leading-relaxed ${
-            message.mediaType === 'image' && message.mediaUrl ? 'overflow-hidden p-0' : 'px-4 py-2.5 whitespace-pre-wrap break-words'
+            (message.mediaType === 'image' || message.mediaType === 'video') && message.mediaUrl
+              ? 'overflow-hidden p-0'
+              : 'px-4 py-2.5 whitespace-pre-wrap break-words'
           } ${
             isInbound
               ? 'bg-gray-700 text-white rounded-tl-sm'
@@ -82,7 +84,7 @@ export default function MessageBubble({ message }: Props) {
             <div>
               <img
                 src={message.mediaUrl}
-                alt="Imagen del cliente"
+                alt="Imagen"
                 className="max-w-full rounded-2xl"
                 style={{ maxHeight: 320, display: 'block' }}
               />
@@ -97,6 +99,13 @@ export default function MessageBubble({ message }: Props) {
               className="max-w-full rounded-2xl"
               style={{ maxHeight: 320, display: 'block' }}
             />
+          ) : message.mediaType === 'audio' && message.mediaUrl ? (
+            <div className="flex flex-col gap-1 px-3 py-2">
+              <audio src={message.mediaUrl} controls style={{ maxWidth: 260 }} />
+              {message.content && message.content !== '[Audio]' && (
+                <p className="text-xs text-gray-400 mt-1">🎤 {message.content}</p>
+              )}
+            </div>
           ) : (
             renderContent(message.content)
           )}

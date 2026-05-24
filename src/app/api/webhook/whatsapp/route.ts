@@ -126,19 +126,24 @@ async function processMessage(parsed: {
     await room.save()
   }
 
-  // Fetch image base64 and transcribe audio before saving message
-  let imageMediaUrl: string | undefined
+  // mediaUrl = URL stored in DB for display in chat (proxy endpoint)
+  // visionUrl = base64 data URL sent to GPT-4o Vision (OpenAI can't access private endpoints)
+  let mediaUrl: string | undefined
+  let visionUrl: string | undefined
   let audioTranscription: string | undefined
 
   if (parsed.mediaType === 'image') {
     if (parsed.mediaId) {
-      imageMediaUrl = (await getWhatsAppMediaAsBase64(parsed.mediaId)) ?? undefined
+      mediaUrl = `/api/media/${parsed.mediaId}`
+      visionUrl = (await getWhatsAppMediaAsBase64(parsed.mediaId)) ?? undefined
     } else if (parsed.mediaUrl) {
-      imageMediaUrl = parsed.mediaUrl
+      mediaUrl = parsed.mediaUrl
+      visionUrl = parsed.mediaUrl
     }
   }
 
   if (parsed.mediaType === 'audio' && parsed.mediaId) {
+    mediaUrl = `/api/media/${parsed.mediaId}`
     const audioData = await getWhatsAppAudioBuffer(parsed.mediaId)
     if (audioData) {
       audioTranscription = (await transcribeAudio(audioData.buffer, audioData.mimeType)) ?? undefined
@@ -146,10 +151,7 @@ async function processMessage(parsed: {
   }
 
   if (parsed.mediaType === 'video' && parsed.mediaId) {
-    const videoData = await getWhatsAppAudioBuffer(parsed.mediaId)
-    if (videoData && videoData.buffer.length < 10 * 1024 * 1024) {
-      imageMediaUrl = `data:${videoData.mimeType};base64,${videoData.buffer.toString('base64')}`
-    }
+    mediaUrl = `/api/media/${parsed.mediaId}`
   }
 
   const inboundContent = parsed.mediaType === 'image'
@@ -167,7 +169,7 @@ async function processMessage(parsed: {
     content: inboundContent,
     waMessageId: parsed.messageId,
     mediaType: parsed.mediaType,
-    mediaUrl: imageMediaUrl,
+    mediaUrl: mediaUrl,
     timestamp: new Date(),
   })
 
@@ -272,7 +274,7 @@ async function processMessage(parsed: {
     room.contextSummary ?? '',
     parsed.from,
     roomData,
-    imageMediaUrl
+    visionUrl
   )
 
   const { cleanText } = extractImageUrls(agentResponse.text)
