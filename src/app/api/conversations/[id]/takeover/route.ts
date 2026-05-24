@@ -11,7 +11,7 @@ import { DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { AgentProduct } from '@/lib/openai-agent'
 
 export async function POST(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   await connectDB()
@@ -44,13 +44,12 @@ export async function DELETE(
   await room.save()
 
   // Activate bot immediately with the client's last message as context
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'https://chat-happy-pets.vercel.app'
-  waitUntil(resumeBot(id, baseUrl).catch(console.error))
+  waitUntil(resumeBot(id).catch(console.error))
 
   return NextResponse.json({ success: true, status: 'bot' })
 }
 
-async function resumeBot(roomId: string, baseUrl: string) {
+async function resumeBot(roomId: string) {
   await connectDB()
 
   const room = await Room.findById(roomId)
@@ -122,7 +121,7 @@ async function resumeBot(roomId: string, baseUrl: string) {
   const { cleanText } = extractImageUrls(agentResponse.text)
 
   if (agentResponse.products.length > 0) {
-    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 2)) {
+    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
       const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
       const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
       let waMessageId: string | null = null

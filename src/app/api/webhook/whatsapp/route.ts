@@ -305,7 +305,7 @@ async function processMessage(parsed: {
   let waMessageId: string | null = null
 
   if (agentResponse.products.length > 0) {
-    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 2)) {
+    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
       const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
       const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
       if (product.imageUrl) {
