@@ -254,14 +254,10 @@ async function processMessage(parsed: {
   const allTexts = history.map(m => m.content.toLowerCase())
   const barfDiscussed = allTexts.some(t => t.includes('barf') || t.includes('dieta') || t.includes('paquete') || t.includes('res') || t.includes('cordero') || t.includes('salmón') || t.includes('salmon'))
   const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
-  const apartmentAsked = outboundTexts.some(t => t.includes('apartamento') || t.includes('apto') || t.includes('indicación adicional'))
 
   const pendingSteps: string[] = []
   if (barfDiscussed && !snacksOffered) {
-    pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Debes ofrecer los snacks AHORA antes de cualquier otro paso.')
-  }
-  if (room.address && !apartmentAsked) {
-    pendingSteps.push('PREGUNTAR APARTAMENTO: ya tienes la dirección del cliente pero nunca se preguntó por número de apartamento o indicaciones adicionales. Pregúntalo antes de continuar.')
+    pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Cuando el cliente confirme el resumen del pedido ("sí, es correcto" o similar), lo PRIMERO que debes hacer es ofrecer snacks ANTES de pedir dirección, ciudad o cualquier otro dato.')
   }
 
   const roomData: RoomKnownData = {
