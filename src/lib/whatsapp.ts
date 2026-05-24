@@ -159,6 +159,16 @@ export async function sendWhatsAppTemplate(
   return { messageId: data.messages?.[0]?.id ?? null, error: null }
 }
 
+export interface AdReferral {
+  sourceType?: string  // "ad" | "post" | "unknown"
+  sourceId?: string    // ID del anuncio en Meta
+  headline?: string    // Título del anuncio
+  body?: string        // Cuerpo del anuncio
+  ctwaClid?: string    // Click-to-WhatsApp click ID
+  sourceUrl?: string   // URL del anuncio
+  adTitle?: string     // ads_context_data.ad_title
+}
+
 export interface IncomingWhatsAppMessage {
   from: string
   name: string
@@ -169,6 +179,7 @@ export interface IncomingWhatsAppMessage {
   mediaType?: 'image' | 'audio' | 'video'
   mediaId?: string   // WhatsApp media_id (requires auth download)
   mediaUrl?: string  // Messenger/Instagram direct URL
+  referral?: AdReferral
 }
 
 export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhatsAppMessage | null {
@@ -183,12 +194,25 @@ export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhat
     const contact = (value?.contacts as Record<string, unknown>[])?.[0]
     const profile = contact?.profile as Record<string, unknown>
 
+    const ref = message.referral as Record<string, unknown> | undefined
+    const adsCtx = ref?.ads_context_data as Record<string, unknown> | undefined
+    const referral: AdReferral | undefined = ref ? {
+      sourceType: ref.source_type as string | undefined,
+      sourceId: ref.source_id as string | undefined,
+      headline: ref.headline as string | undefined,
+      body: ref.body as string | undefined,
+      ctwaClid: ref.ctwa_clid as string | undefined,
+      sourceUrl: ref.source_url as string | undefined,
+      adTitle: (adsCtx?.ad_title as string | undefined) ?? (ref.headline as string | undefined),
+    } : undefined
+
     const base = {
       from: message.from as string,
       name: (profile?.name as string) ?? 'Desconocido',
       messageId: message.id as string,
       timestamp: message.timestamp as string,
       channel: 'whatsapp' as const,
+      referral,
     }
 
     if (message.type === 'text') {

@@ -11,6 +11,7 @@ const NAV = [
   { href: '/settings/rules', label: 'Reglas', icon: '⚡', badgeKey: null },
   { href: '/settings/close-reasons', label: 'Motivos de cierre', icon: '🔴', badgeKey: null },
   { href: '/settings/templates', label: 'Plantillas', icon: '📋', badgeKey: null },
+  { href: '/settings/lead-statuses', label: 'Estados de lead', icon: '🏷️', badgeKey: null },
 ]
 
 export default function Sidebar() {

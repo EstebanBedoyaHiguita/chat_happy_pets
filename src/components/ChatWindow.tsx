@@ -26,6 +26,8 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
   const [selectedTemplate, setSelectedTemplate] = useState<string>('')
   const [templateVars, setTemplateVars] = useState<string[]>([])
   const [reopenError, setReopenError] = useState<string>('')
+  const [leadStatuses, setLeadStatuses] = useState<{ _id: string; name: string; color: string; active: boolean }[]>([])
+  const [leadStatusId, setLeadStatusId] = useState(conversation.leadStatusId ?? '')
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -136,6 +138,28 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
     }
   }
 
+  async function handleOpenContactCard() {
+    const res = await fetch('/api/config/lead-statuses')
+    if (res.ok) setLeadStatuses(await res.json())
+    setLeadStatusId(conversation.leadStatusId ?? '')
+    setShowContactCard(true)
+  }
+
+  async function handleLeadStatusChange(statusId: string) {
+    setLeadStatusId(statusId)
+    const chosen = leadStatuses.find((s) => s._id === statusId)
+    await fetch(`/api/conversations/${conversation._id}/lead-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        statusId: statusId || null,
+        statusName: chosen?.name ?? '',
+        statusColor: chosen?.color ?? '',
+      }),
+    })
+    onStatusChange()
+  }
+
   async function handleOpenReopenModal() {
     const res = await fetch('/api/templates')
     if (res.ok) setTemplates(await res.json())
@@ -202,7 +226,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-gray-900">
           <button
-            onClick={() => setShowContactCard((v) => !v)}
+            onClick={() => showContactCard ? setShowContactCard(false) : handleOpenContactCard()}
             className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
           >
             <div className="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center text-white font-semibold">
@@ -333,6 +357,45 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
                 <p className="text-white text-sm">{value || '—'}</p>
               </div>
             ))}
+
+            {/* Lead status selector */}
+            <div className="mb-4">
+              <p className="text-gray-500 text-xs mb-1.5">Estado del lead</p>
+              <select
+                value={leadStatusId}
+                onChange={(e) => handleLeadStatusChange(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-green-500"
+                style={leadStatusId ? { borderLeftWidth: 3, borderLeftColor: leadStatuses.find(s => s._id === leadStatusId)?.color ?? '#6b7280' } : {}}
+              >
+                <option value="">Sin estado</option>
+                {leadStatuses.filter(s => s.active).map((s) => (
+                  <option key={s._id} value={s._id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Ad / Lead source */}
+            {conversation.adSource && (
+              <div className="mt-1 mb-3 rounded-xl border border-gray-700 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 bg-gray-800">
+                  <span className="text-xs font-medium text-gray-300">📣 Origen del lead</span>
+                </div>
+                <div className="px-3 py-2.5 flex flex-col gap-2 bg-gray-900">
+                  {[
+                    { label: 'Fuente', value: conversation.adSource },
+                    { label: 'Anuncio', value: conversation.adTitle },
+                    { label: 'Descripción', value: conversation.adBody },
+                    { label: 'Ad ID', value: conversation.adId },
+                    { label: 'CTWA Click ID', value: conversation.ctwaClid },
+                  ].filter(({ value }) => !!value).map(({ label, value }) => (
+                    <div key={label} className="flex flex-col gap-0.5">
+                      <span className="text-gray-500 text-xs">{label}</span>
+                      <span className="text-white text-xs break-all">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Pet sections */}
             {[

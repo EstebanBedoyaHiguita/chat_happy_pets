@@ -33,6 +33,15 @@ export interface IRoom {
   closedBy?: string
   unreadCount: number
   contextSummary: string
+  leadStatusId?: string
+  leadStatusName?: string
+  leadStatusColor?: string
+  adSource?: string
+  adId?: string
+  adTitle?: string
+  adBody?: string
+  ctwaClid?: string
+  sourceUrl?: string
   createdAt: string
   updatedAt: string
 }

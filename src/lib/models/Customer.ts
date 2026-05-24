@@ -18,6 +18,12 @@ export interface ICustomer extends Document {
   pet3Type: string
   pet3Age: string
   pet3Weight: string
+  adSource?: string
+  adId?: string
+  adTitle?: string
+  adBody?: string
+  ctwaClid?: string
+  sourceUrl?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -41,6 +47,12 @@ const CustomerSchema = new Schema<ICustomer>(
     pet3Type: { type: String, default: '' },
     pet3Age: { type: String, default: '' },
     pet3Weight: { type: String, default: '' },
+    adSource: { type: String },
+    adId: { type: String },
+    adTitle: { type: String },
+    adBody: { type: String },
+    ctwaClid: { type: String },
+    sourceUrl: { type: String },
   },
   { timestamps: true }
 )

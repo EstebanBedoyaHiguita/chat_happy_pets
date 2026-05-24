@@ -5,7 +5,7 @@ import { Room } from '@/lib/models/Room'
 import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppMediaAsBase64, getWhatsAppAudioBuffer } from '@/lib/whatsapp'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppMediaAsBase64, getWhatsAppAudioBuffer, type AdReferral } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
@@ -89,6 +89,7 @@ async function processMessage(parsed: {
   mediaType?: 'image' | 'audio' | 'video'
   mediaId?: string
   mediaUrl?: string
+  referral?: AdReferral
 }, baseUrl = '') {
   // Mark as read (WhatsApp only — Messenger/Instagram mark read via different API)
   if (parsed.channel === 'whatsapp') markWhatsAppMessageRead(parsed.messageId)
@@ -102,6 +103,15 @@ async function processMessage(parsed: {
   // Get or create room — key is channel:senderId to allow same person on multiple channels
   const roomKey = parsed.channel === 'whatsapp' ? parsed.from : `${parsed.channel}:${parsed.from}`
   let room = await Room.findOne({ waId: roomKey })
+  const adFields = parsed.referral ? {
+    adSource: parsed.referral.sourceType,
+    adId: parsed.referral.sourceId,
+    adTitle: parsed.referral.adTitle ?? parsed.referral.headline,
+    adBody: parsed.referral.body,
+    ctwaClid: parsed.referral.ctwaClid,
+    sourceUrl: parsed.referral.sourceUrl,
+  } : {}
+
   if (!room) {
     room = await Room.create({
       waId: roomKey,
@@ -112,10 +122,11 @@ async function processMessage(parsed: {
       lastMessage: parsed.text,
       lastMessageAt: new Date(),
       windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      ...adFields,
     })
     await Customer.findOneAndUpdate(
       { waId: roomKey },
-      { $setOnInsert: { name: parsed.name, phone: parsed.from } },
+      { $setOnInsert: { name: parsed.name, phone: parsed.from, ...adFields } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )
   } else {

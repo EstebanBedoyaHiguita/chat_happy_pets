@@ -31,6 +31,16 @@ export interface RoomDoc extends Document {
   closedBy?: string
   unreadCount: number
   contextSummary: string
+  leadStatusId?: string
+  leadStatusName?: string
+  leadStatusColor?: string
+  // Meta Ads / Click-to-WhatsApp attribution
+  adSource?: string
+  adId?: string
+  adTitle?: string
+  adBody?: string
+  ctwaClid?: string
+  sourceUrl?: string
 }
 
 const RoomSchema = new Schema<RoomDoc>(
@@ -66,6 +76,15 @@ const RoomSchema = new Schema<RoomDoc>(
     closedBy: { type: String },
     unreadCount: { type: Number, default: 0 },
     contextSummary: { type: String, default: '' },
+    leadStatusId: { type: String },
+    leadStatusName: { type: String },
+    leadStatusColor: { type: String },
+    adSource: { type: String },
+    adId: { type: String },
+    adTitle: { type: String },
+    adBody: { type: String },
+    ctwaClid: { type: String },
+    sourceUrl: { type: String },
   },
   { timestamps: true }
 )
