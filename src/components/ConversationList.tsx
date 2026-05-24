@@ -4,6 +4,7 @@ import type { IConversation, ConversationStatus } from '@/types'
 
 interface Props {
   conversations: IConversation[]
+  counts: { all: number; bot: number; human: number; closed: number }
   selectedId: string | null
   onSelect: (id: string) => void
   filter: ConversationStatus | 'all'
@@ -37,6 +38,7 @@ function timeAgo(dateStr: string) {
 
 export default function ConversationList({
   conversations,
+  counts,
   selectedId,
   onSelect,
   filter,
@@ -54,7 +56,7 @@ export default function ConversationList({
           <h2 className="text-white font-semibold text-lg flex items-center gap-2">
             <span>🐾</span> Chats
           </h2>
-          <span className="text-xs text-gray-500">{conversations.length} conversaciones</span>
+          <span className="text-xs text-gray-500">{counts.all} conversaciones</span>
         </div>
 
         {/* Search */}
@@ -72,13 +74,16 @@ export default function ConversationList({
             <button
               key={f}
               onClick={() => onFilterChange(f)}
-              className={`flex-1 text-xs py-1.5 rounded-md font-medium transition-colors ${
+              className={`flex-1 text-xs py-1.5 px-1 rounded-md font-medium transition-colors flex flex-col items-center gap-0.5 ${
                 filter === f
                   ? 'bg-green-600 text-white'
                   : 'text-gray-400 hover:text-white hover:bg-gray-800'
               }`}
             >
-              {STATUS_LABELS[f]}
+              <span>{STATUS_LABELS[f]}</span>
+              <span className={`text-[10px] font-bold leading-none ${filter === f ? 'text-green-200' : 'text-gray-500'}`}>
+                {counts[f]}
+              </span>
             </button>
           ))}
         </div>
