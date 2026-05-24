@@ -145,6 +145,13 @@ async function processMessage(parsed: {
     }
   }
 
+  if (parsed.mediaType === 'video' && parsed.mediaId) {
+    const videoData = await getWhatsAppAudioBuffer(parsed.mediaId)
+    if (videoData && videoData.buffer.length < 10 * 1024 * 1024) {
+      imageMediaUrl = `data:${videoData.mimeType};base64,${videoData.buffer.toString('base64')}`
+    }
+  }
+
   const inboundContent = parsed.mediaType === 'image'
     ? `[Imagen${parsed.text ? `: ${parsed.text}` : ''}]`
     : parsed.mediaType === 'audio'
@@ -178,7 +185,7 @@ async function processMessage(parsed: {
 
   if (room.status !== 'bot') return
 
-  // Video: canned response (can't transcribe video)
+  // Video: canned response (bot can't interpret video, but it's stored for human agents)
   if (parsed.mediaType === 'video') {
     const waId = await sendChannelMessage(parsed.channel, parsed.from, UNSUPPORTED_MEDIA_MSG)
     await Message.create({

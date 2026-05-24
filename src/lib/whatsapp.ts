@@ -211,7 +211,8 @@ export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhat
     }
 
     if (message.type === 'video') {
-      return { ...base, text: '', mediaType: 'video' }
+      const video = message.video as Record<string, unknown>
+      return { ...base, text: '', mediaType: 'video', mediaId: video?.id as string }
     }
 
     return null

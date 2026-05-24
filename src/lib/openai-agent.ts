@@ -391,7 +391,8 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
 export async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string | null> {
   try {
     const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : mimeType.includes('mpeg') ? 'mp3' : 'ogg'
-    const file = new File([buffer], `audio.${ext}`, { type: mimeType })
+    const ab = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer
+    const file = new File([ab], `audio.${ext}`, { type: mimeType })
     const result = await getOpenAI().audio.transcriptions.create({
       file,
       model: 'whisper-1',

@@ -90,6 +90,13 @@ export default function MessageBubble({ message }: Props) {
                 <p className="px-3 py-2 text-sm">{message.content.replace(/^\[Imagen:\s*/, '').replace(/\]$/, '')}</p>
               )}
             </div>
+          ) : message.mediaType === 'video' && message.mediaUrl ? (
+            <video
+              src={message.mediaUrl}
+              controls
+              className="max-w-full rounded-2xl"
+              style={{ maxHeight: 320, display: 'block' }}
+            />
           ) : (
             renderContent(message.content)
           )}
