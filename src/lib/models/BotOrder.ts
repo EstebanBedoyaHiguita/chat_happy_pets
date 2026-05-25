@@ -49,7 +49,7 @@ const BotOrderSchema = new Schema<BotOrderDoc>(
     shippingAddress: {
       address: { type: String, required: true },
       city: { type: String, required: true },
-      department: { type: String, required: true },
+      department: { type: String, default: '' },
       notes: { type: String, default: '' },
     },
     status: {

@@ -10,6 +10,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  try {
   await connectDB()
   const body = await req.json()
   const { customerName, customerPhone, items, address, city, department, notes, shipping = 0 } = body
@@ -20,14 +21,14 @@ export async function POST(req: NextRequest) {
 
   const orderItems = (items as { name: string; quantity: number; price: number }[]).map((i) => ({
     name: i.name,
-    price: i.price,
-    quantity: i.quantity,
-    lineTotal: i.price * i.quantity,
+    price: Number(i.price) || 0,
+    quantity: Number(i.quantity) || 1,
+    lineTotal: (Number(i.price) || 0) * (Number(i.quantity) || 1),
     image: '',
   }))
 
   const subtotal = orderItems.reduce((s, i) => s + i.lineTotal, 0)
-  const total = subtotal + shipping
+  const total = subtotal + Number(shipping)
   const orderNumber = `WA-${Date.now()}`
 
   const cookieStore = await cookies()
@@ -88,4 +89,8 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ success: true, orderNumber }, { status: 201 })
+  } catch (err) {
+    console.error('[POST /api/bot-orders]', err)
+    return NextResponse.json({ error: 'Error al crear el pedido' }, { status: 500 })
+  }
 }
