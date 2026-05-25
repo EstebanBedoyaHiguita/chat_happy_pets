@@ -103,7 +103,10 @@ export default function OrdersPage() {
     setShowModal(true)
     if (catalog.length === 0) {
       const res = await fetch('/api/products')
-      if (res.ok) setCatalog(await res.json())
+      if (res.ok) {
+        const data = await res.json()
+        setCatalog(Array.isArray(data) ? data : [])
+      }
     }
   }
 
@@ -115,7 +118,7 @@ export default function OrdersPage() {
     ))
   }
 
-  async function handleCreateManual(e: React.FormEvent) {
+  async function handleCreateManual(e: React.SyntheticEvent) {
     e.preventDefault()
     if (saving) return
     setSaving(true)
