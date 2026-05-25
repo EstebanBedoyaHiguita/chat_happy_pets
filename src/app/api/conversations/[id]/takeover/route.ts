@@ -55,9 +55,12 @@ async function resumeBot(roomId: string) {
   const room = await Room.findById(roomId)
   if (!room || room.status !== 'bot') return
 
-  // Get last inbound message from the client
-  const lastInbound = await Message.findOne({ roomId: room._id, direction: 'inbound' }).sort({ timestamp: -1 })
-  if (!lastInbound) return
+  // Only respond if the last message is from the client — if the last message
+  // is from the agent, wait for the client to write first
+  const lastMessage = await Message.findOne({ roomId: room._id }).sort({ timestamp: -1 })
+  if (!lastMessage || lastMessage.direction === 'outbound') return
+
+  const lastInbound = lastMessage
 
   const history = await Message.find({ roomId: room._id })
     .sort({ timestamp: -1 })
