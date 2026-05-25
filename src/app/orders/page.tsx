@@ -38,6 +38,12 @@ interface ManualItem {
   price: number
 }
 
+interface CatalogProduct {
+  _id: string
+  name: string
+  price: number
+}
+
 const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: 'Pendiente',
   delivered: 'Entregado',
@@ -69,6 +75,7 @@ export default function OrdersPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [manualItems, setManualItems] = useState<ManualItem[]>([{ name: '', quantity: 1, price: 0 }])
   const [saving, setSaving] = useState(false)
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([])
 
   async function fetchOrders() {
     const res = await fetch('/api/bot-orders')
@@ -90,6 +97,22 @@ export default function OrdersPage() {
 
   function removeItem(i: number) {
     setManualItems(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  async function openModal() {
+    setShowModal(true)
+    if (catalog.length === 0) {
+      const res = await fetch('/api/products')
+      if (res.ok) setCatalog(await res.json())
+    }
+  }
+
+  function selectProduct(i: number, productId: string) {
+    const product = catalog.find(p => p._id === productId)
+    if (!product) return
+    setManualItems(prev => prev.map((item, idx) =>
+      idx === i ? { ...item, name: product.name, price: product.price } : item
+    ))
   }
 
   async function handleCreateManual(e: React.FormEvent) {
@@ -148,7 +171,7 @@ export default function OrdersPage() {
               </p>
             </div>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={openModal}
               className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition-colors"
             >
               + Nuevo pedido
@@ -325,12 +348,21 @@ export default function OrdersPage() {
                   <div className="space-y-2">
                     {manualItems.map((item, i) => (
                       <div key={i} className="flex gap-2 items-center">
-                        <input placeholder="Nombre producto" value={item.name} onChange={e => updateItem(i, 'name', e.target.value)}
-                          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-green-500" />
-                        <input type="number" min={1} placeholder="Cant" value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)}
+                        <select
+                          value={catalog.find(p => p.name === item.name)?._id ?? ''}
+                          onChange={e => selectProduct(i, e.target.value)}
+                          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-green-500"
+                        >
+                          <option value="">Seleccionar producto...</option>
+                          {catalog.map(p => (
+                            <option key={p._id} value={p._id}>{p.name}</option>
+                          ))}
+                        </select>
+                        <input type="number" min={1} value={item.quantity} onChange={e => updateItem(i, 'quantity', e.target.value)}
                           className="w-16 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-green-500" />
-                        <input type="number" min={0} placeholder="Precio" value={item.price || ''} onChange={e => updateItem(i, 'price', e.target.value)}
-                          className="w-28 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-green-500" />
+                        <span className="text-gray-400 text-sm w-28 text-right whitespace-nowrap">
+                          {item.price ? `$${item.price.toLocaleString('es-CO')}` : '—'}
+                        </span>
                         {manualItems.length > 1 && (
                           <button type="button" onClick={() => removeItem(i)} className="text-red-500 hover:text-red-400 text-sm px-1">✕</button>
                         )}
