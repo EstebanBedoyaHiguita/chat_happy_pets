@@ -40,7 +40,6 @@ export async function GET(req: NextRequest) {
     status: 'bot',
     windowExpiresAt: { $gt: now },
     proactiveStage: { $lt: 3 },
-    lastInboundAt: { $exists: true, $ne: null },
   }).lean()
 
   if (rooms.length === 0) {
@@ -58,7 +57,12 @@ export async function GET(req: NextRequest) {
   for (const room of rooms) {
     if (orderedWaIds.has(room.waId)) continue
 
-    const lastInbound = room.lastInboundAt ? new Date(room.lastInboundAt) : null
+    // Use lastInboundAt if available, fall back to lastMessageAt for older rooms
+    const lastInbound = room.lastInboundAt
+      ? new Date(room.lastInboundAt)
+      : room.lastMessageAt
+        ? new Date(room.lastMessageAt)
+        : null
     if (!lastInbound) continue
 
     const elapsed = now.getTime() - lastInbound.getTime()
