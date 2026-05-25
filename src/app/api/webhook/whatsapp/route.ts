@@ -121,7 +121,9 @@ async function processMessage(parsed: {
       status: 'bot',
       lastMessage: parsed.text,
       lastMessageAt: new Date(),
+      lastInboundAt: new Date(),
       windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      proactiveStage: 0,
       ...adFields,
     })
     await Customer.findOneAndUpdate(
@@ -132,8 +134,10 @@ async function processMessage(parsed: {
   } else {
     room.lastMessage = parsed.text
     room.lastMessageAt = new Date()
+    room.lastInboundAt = new Date()
     room.windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
     room.unreadCount += 1
+    room.proactiveStage = 0
     if (room.name === 'Desconocido' && parsed.name !== 'Desconocido') room.name = parsed.name
     await room.save()
   }

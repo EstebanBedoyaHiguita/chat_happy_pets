@@ -41,6 +41,8 @@ export interface RoomDoc extends Document {
   adBody?: string
   ctwaClid?: string
   sourceUrl?: string
+  proactiveStage?: number
+  lastInboundAt?: Date
 }
 
 const RoomSchema = new Schema<RoomDoc>(
@@ -85,6 +87,8 @@ const RoomSchema = new Schema<RoomDoc>(
     adBody: { type: String },
     ctwaClid: { type: String },
     sourceUrl: { type: String },
+    proactiveStage: { type: Number, default: 0 },
+    lastInboundAt: { type: Date },
   },
   { timestamps: true }
 )
