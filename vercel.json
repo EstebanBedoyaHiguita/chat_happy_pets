@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/close-windows",
       "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/proactive",
-      "schedule": "*/30 * * * *"
     }
   ]
 }
