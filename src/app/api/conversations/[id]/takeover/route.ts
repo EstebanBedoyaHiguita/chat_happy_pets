@@ -69,11 +69,14 @@ async function resumeBot(roomId: string) {
 
   const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
   const allTexts = history.map(m => m.content.toLowerCase())
-  const barfDiscussed = allTexts.some(t => t.includes('barf') || t.includes('dieta') || t.includes('paquete') || t.includes('res') || t.includes('cordero') || t.includes('salmón') || t.includes('salmon'))
+  const orderSummaryShown = outboundTexts.some(t =>
+    (t.includes('¿es correcto?') || t.includes('es correcto?')) &&
+    t.includes('total') && t.includes('cop')
+  )
   const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
 
   const pendingSteps: string[] = []
-  if (barfDiscussed && !snacksOffered) {
+  if (orderSummaryShown && !snacksOffered) {
     pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Cuando el cliente confirme el resumen del pedido ("sí, es correcto" o similar), lo PRIMERO que debes hacer es ofrecer snacks ANTES de pedir dirección, ciudad o cualquier otro dato.')
   }
 
