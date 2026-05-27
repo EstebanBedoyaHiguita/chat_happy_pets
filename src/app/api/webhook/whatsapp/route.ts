@@ -255,7 +255,6 @@ async function processMessage(parsed: {
 
   // Detect pending flow steps so the agent doesn't skip them
   const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
-  const allTexts = history.map(m => m.content.toLowerCase())
   const orderSummaryShown = outboundTexts.some(t =>
     (t.includes('¿es correcto?') || t.includes('es correcto?')) &&
     t.includes('total') && t.includes('cop')
@@ -263,6 +262,13 @@ async function processMessage(parsed: {
   const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
 
   const pendingSteps: string[] = []
+
+  const hasOutbound = outboundTexts.length > 0
+  if (!hasOutbound) {
+    const clientName = room.name && room.name !== 'Desconocido' ? room.name : ''
+    pendingSteps.push(`SALUDO OBLIGATORIO — PRIMER MENSAJE: Tu respuesta DEBE comenzar EXACTAMENTE así antes de cualquier otra cosa: "¡Hola${clientName ? ` ${clientName}` : ''}! Soy Sara, asesora virtual de Happy Pets Family 🐾" — luego continúa respondiendo lo que el cliente necesita en el mismo mensaje. NO omitas este saludo bajo ninguna circunstancia.`)
+  }
+
   if (orderSummaryShown && !snacksOffered) {
     pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Cuando el cliente confirme el resumen del pedido ("sí, es correcto" o similar), lo PRIMERO que debes hacer es ofrecer snacks ANTES de pedir dirección, ciudad o cualquier otro dato.')
   }
