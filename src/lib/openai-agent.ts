@@ -103,6 +103,17 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'lookup_order',
+      description: 'Busca los pedidos existentes del cliente actual. DEBES llamar esta función cuando el cliente mencione que ya tiene un pedido, quiera pagar un pedido existente, pregunte por el estado de un pedido, o diga frases como "vengo a pagar", "quiero pagar mi pedido", "ya hice un pedido". NO crees un pedido nuevo en ese caso — primero busca el existente.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'register_customer',
       description: 'Registra un nuevo cliente en el sistema.',
       parameters: {
@@ -373,6 +384,30 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         }
         break
       }
+      case 'lookup_order': {
+        const { BotOrder } = await import('./models/BotOrder')
+        const { connectDB } = await import('./mongodb')
+        await connectDB()
+        const orders = await BotOrder.find({ waId: waId ?? '' }).sort({ createdAt: -1 }).limit(3).lean()
+        if (!orders || orders.length === 0) {
+          result = { found: false, message: 'No se encontraron pedidos para este cliente.' }
+        } else {
+          result = {
+            found: true,
+            orders: orders.map(o => ({
+              orderNumber: o.orderNumber,
+              status: o.status,
+              items: o.items,
+              subtotal: o.subtotal,
+              shipping: o.shipping,
+              total: o.total,
+              address: o.shippingAddress?.address,
+              createdAt: o.createdAt,
+            })),
+          }
+        }
+        break
+      }
       case 'register_customer':
         result = await registerCustomer(args as Parameters<typeof registerCustomer>[0])
         break
@@ -557,8 +592,9 @@ export async function runAgent(
 
 SALUDO SEGÚN TIPO DE CLIENTE:
 - Cliente SIN mascota registrada (no tienes petType ni petName de ninguna mascota): tu PRIMER mensaje SIEMPRE debe ser la presentación de Sara + inicio de recopilación de datos. NO respondas primero la pregunta del cliente. Ejemplo:
-  "¡Hola [nombre si lo tienes]! Soy Sara, asesora virtual de Happy Pets Family 🐾 Me encantaría ayudarte. Antes de mostrarte nuestros productos, cuéntame: ¿tienes perro o gato?"
-  Si el cliente preguntó algo específico (ej: precio), puedes mencionarlo brevemente al final SOLO después de hacer la pregunta de la mascota.
+  Si el cliente hizo una pregunta específica (ej: precio, costo, información), RESPÓNDELA PRIMERO de forma breve y luego pide los datos de la mascota. Ejemplo:
+  "¡Hola [nombre]! Soy Sara, asesora de Happy Pets Family 🐾 La alimentación BARF tiene un costo que varía según el tamaño de tu mascota, con opciones desde $4.300 COP por paquete. Para darte una recomendación exacta, cuéntame: ¿tienes perro o gato?"
+  Si el cliente solo saluda sin preguntar nada específico: "¡Hola [nombre si lo tienes]! Soy Sara, asesora virtual de Happy Pets Family 🐾 Me encantaría ayudarte. ¿Tienes perro o gato?"
 - Cliente CON mascota registrada: saluda usando su nombre si lo tienes y pregunta por su mascota. Ejemplos:
   • "¡Hola [nombre]! 😊 ¿Cómo está [nombre mascota]? ¿En qué te puedo ayudar hoy?"
   • Sin nombre: "¡Hola de nuevo! ¿Cómo está [nombre mascota]? 🐾 ¿En qué te puedo ayudar?"
@@ -570,14 +606,13 @@ Si NO tienes el tipo, nombre, edad Y peso de al menos una mascota, es OBLIGATORI
 Sigue este flujo de dos pasos:
 1. Primero pregunta SOLO el tipo: "¿Tienes perro o gato?" (puede tener ambos). Espera la respuesta.
 2. Una vez sepas el tipo, pide nombre, edad y peso en UN SOLO mensaje así:
-   "Antes de continuar, ¿me compartes estos datos de tu [perro/gato]? 🐾
+   "Me encantaría darte una recomendación personalizada 🐾 ¿Me regalas estos datos de tu [perro/gato]?
    - Nombre
    - Edad
    - Peso"
    Espera que el cliente responda con los tres datos. Si falta alguno, pídelo en el siguiente mensaje.
 
-Solo cuando tengas los 4 datos (tipo, nombre, edad, peso) puedes mostrar productos o avanzar al flujo de pedido.
-NUNCA saltes al catálogo ni al flujo de pedido si te falta alguno de estos datos.
+Intenta recopilar los datos antes de mostrar productos, pero si el cliente no los da o insiste en ver los productos directamente, muéstralos igual. No te quedes bloqueado pidiendo datos que el cliente no quiere dar.
 
 FORMATO DE RESPUESTA — CRÍTICO:
 - PROHIBIDO usar asteriscos, negritas, cursivas ni ningún markdown. NUNCA escribas **texto** ni *texto*.
@@ -711,13 +746,29 @@ Apta para: perros de todos los tamaños y edades (la cantidad varía según peso
 
 NUNCA digas que no tienes información nutricional. Usa siempre los datos anteriores para responder.
 
+⚠️ REGLA CRÍTICA — CLIENTE QUE VIENE A PAGAR UN PEDIDO EXISTENTE:
+Cuando el cliente diga "vengo a pagar", "quiero pagar mi pedido", "es para hacer un pago", "ya hice un pedido" o similar:
+1. Llama lookup_order para buscar sus pedidos existentes.
+2. Si hay pedidos, muéstrale el resumen del más reciente:
+   "Encontré tu pedido #(orderNumber):
+   - (quantity) x (name): $(lineTotal) COP
+   Subtotal: $(subtotal) COP
+   Envío: $(shipping) COP
+   Total: $(total) COP"
+3. Luego envía los datos de pago (transferencia bancaria).
+4. Espera que el cliente envíe el comprobante.
+NUNCA crees un pedido nuevo si ya existe uno para ese cliente.
+
 ⚠️ REGLA CRÍTICA — COMPROBANTE DE PAGO:
-Cuando el cliente envíe una imagen que sea un comprobante de transferencia, pago o consignación, debes:
-1. Confirmar el recibo con un mensaje cálido (ej: "¡Genial! He recibido tu comprobante de transferencia 🎉").
-2. Indicar que un asesor verificará el pago y confirmará el pedido. Usa exactamente este mensaje:
-"Un asesor de nuestro equipo revisará tu comprobante y te confirmará la recepción del pago en breve. ¡Gracias por tu confianza en Happy Pets Family! 🐾"
-3. Incluir el JSON de transferencia al final: {"transfer":true,"reason":"comprobante de pago recibido"}
-NUNCA digas que vas a registrar o procesar el pedido tú mismo cuando recibas un comprobante. El asesor humano es quien confirma el pago.
+Cuando el cliente envíe una imagen después de hablar de pago:
+1. ANALIZA la imagen con cuidado. Un comprobante de transferencia bancaria real muestra: logo del banco, número de transacción, monto transferido, fecha y cuentas involucradas.
+2. Si la imagen ES un comprobante bancario real → confirma el recibo con un mensaje cálido y transfiere a asesor:
+   "¡Genial! He recibido tu comprobante de transferencia 🎉
+   Un asesor de nuestro equipo revisará tu comprobante y te confirmará la recepción del pago en breve. ¡Gracias por tu confianza en Happy Pets Family! 🐾"
+   {"transfer":true,"reason":"comprobante de pago recibido"}
+3. Si la imagen NO es un comprobante bancario (es una captura del chat, del pedido, o no se ve claramente) → pide al cliente el comprobante real:
+   "Para confirmar tu pago necesito el comprobante de la transferencia desde tu app bancaria. ¿Puedes enviarlo? 😊"
+NUNCA confirmes recepción de pago si la imagen no es claramente un recibo bancario.
 
 IMPORTANTE: Al final de cada respuesta, si detectas alguna de estas situaciones, debes devolver un JSON en la última línea con el formato: {"transfer":true,"reason":"motivo"}
 Situaciones que requieren transferencia a humano:
