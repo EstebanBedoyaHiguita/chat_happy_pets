@@ -912,12 +912,12 @@ Si NO hay que transferir, no incluyas ese JSON.`
     }
   }
 
-  // Only send product cards for products the bot explicitly named in its response.
-  // Without this, all 20 catalog items fill collectedProducts and the webhook sends
-  // whichever 2 happen to be first — not the ones the bot actually recommended.
-  const textLower = fullText.toLowerCase()
+  // Only send product cards for products whose image URL the agent explicitly included
+  // in its response. This lets the agent list products as plain text (no image URLs)
+  // for the initial BARF presentation, and only show image cards when the client
+  // selects a specific product and the agent includes that product's image URL.
   const mentionedProducts = collectedProducts.filter(p =>
-    textLower.includes(p.name.toLowerCase())
+    p.imageUrl && fullText.includes(p.imageUrl)
   )
 
   // Parse transfer signal from last line
