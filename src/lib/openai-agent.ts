@@ -326,11 +326,10 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         const snackItems = items.filter(i => !isBarf(i.name))
         const snacksText = snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - ')
 
-        // Match only within BARF products; exclude lets "Pollo" not match "Pollo con Frutas"
-        const barfQty = (keyword: string, exclude?: string) => {
+        const barfQty = (keywords: string[], excludes: string[] = []) => {
           const item = barfItems.find(i => {
             const n = sheetNorm(i.name)
-            return n.includes(keyword) && (!exclude || !n.includes(exclude))
+            return keywords.every(k => n.includes(k)) && excludes.every(e => !n.includes(e))
           })
           return item ? item.quantity : ''
         }
@@ -340,17 +339,18 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           celular: waId ?? '',
           vend: 'Bot',
           nombreCliente: roomData?.name ?? '',
-          pollo:    barfQty('pollo', 'fruta'),
-          fruta:    barfQty('fruta'),
-          cordero:  barfQty('cordero'),
-          res:      barfQty('res'),
-          pez:      barfQty('pez') || barfQty('pescado'),
-          gPollo:   barfQty('gato pollo') || barfQty('g.pll'),
-          gTernera: barfQty('gato ternera') || barfQty('g.ter') || barfQty('ternera'),
-          salmon:   barfQty('salmon') || barfQty('salmón'),
-          conejo:   barfQty('conejo'),
+          pollo:    barfQty(['pollo'], ['fruta', 'gato']),
+          fruta:    barfQty(['fruta']),
+          cordero:  barfQty(['cordero']),
+          res:      barfQty(['res']),
+          pez:      barfQty(['pescado']) || barfQty(['pez']),
+          conejo:   barfQty(['conejo']),
+          salmon:   barfQty(['salmon']) || barfQty(['salmón']),
+          gPollo:   barfQty(['gato', 'pollo']),
+          gTernera: barfQty(['gato', 'ternera']),
           snacks:   snacksText,
           observaciones: [addressWithCity, args.notes].filter(Boolean).join(' | '),
+          tipoPago: 'CX',
           orderNumber,
         }
 
