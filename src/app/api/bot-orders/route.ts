@@ -54,10 +54,10 @@ export async function POST(req: NextRequest) {
     const isBarf = (name: string) => sheetNorm(name).includes('barf') || sheetNorm(name).includes('dieta')
     const barfItems = orderItems.filter(i => isBarf(i.name))
     const snackItems = orderItems.filter(i => !isBarf(i.name))
-    const barfQty = (keyword: string, exclude?: string) => {
+    const barfQty = (keywords: string[], excludes: string[] = []) => {
       const item = barfItems.find(i => {
         const n = sheetNorm(i.name)
-        return n.includes(keyword) && (!exclude || !n.includes(exclude))
+        return keywords.every(k => n.includes(k)) && excludes.every(e => !n.includes(e))
       })
       return item ? item.quantity : ''
     }
@@ -67,15 +67,15 @@ export async function POST(req: NextRequest) {
       celular: customerPhone ?? '',
       vend: agentName,
       nombreCliente: customerName,
-      pollo:    barfQty('pollo', 'fruta'),
-      fruta:    barfQty('fruta'),
-      cordero:  barfQty('cordero'),
-      res:      barfQty('res'),
-      pez:      barfQty('pez') || barfQty('pescado'),
-      conejo:   barfQty('conejo'),
-      salmon:   barfQty('salmon') || barfQty('salmón'),
-      gPollo:   barfQty('gato pollo') || barfQty('g.pll'),
-      gTernera: barfQty('gato ternera') || barfQty('g.ter') || barfQty('ternera'),
+      pollo:    barfQty(['pollo'], ['fruta', 'gato']),
+      fruta:    barfQty(['fruta']),
+      cordero:  barfQty(['cordero']),
+      res:      barfQty(['res']),
+      pez:      barfQty(['pescado']) || barfQty(['pez']),
+      conejo:   barfQty(['conejo']),
+      salmon:   barfQty(['salmon']) || barfQty(['salmón']),
+      gPollo:   barfQty(['gato', 'pollo']),
+      gTernera: barfQty(['gato', 'ternera']),
       snacks:   snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - '),
       observaciones: [address, city, notes].filter(Boolean).join(' | '),
       tipoPago: 'CX',

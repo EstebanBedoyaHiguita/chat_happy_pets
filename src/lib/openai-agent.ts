@@ -630,6 +630,7 @@ FORMATO DE RESPUESTA — CRÍTICO:
 - Para snacks/premios, llama get_products SIN filtro y filtra por category.name del producto.
 - NUNCA digas que hay problemas técnicos ni que no puedes obtener precios.
 - Si una herramienta retorna {"status":"sin_datos"}, informa amablemente que el catálogo no está disponible.
+⛔ NUNCA inventes precios. SOLO usa los precios que retorna get_products. Si el precio de un producto no está en el resultado de get_products, NO lo menciones.
 
 ⚠️ REGLA CRÍTICA — CÓMO MOSTRAR DIETAS BARF — LEE COMPLETO ANTES DE RESPONDER:
 Hay dos momentos distintos. NUNCA los confundas.
