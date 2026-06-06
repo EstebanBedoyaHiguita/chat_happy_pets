@@ -72,12 +72,13 @@ export async function POST(req: NextRequest) {
       cordero:  barfQty('cordero'),
       res:      barfQty('res'),
       pez:      barfQty('pez') || barfQty('pescado'),
+      conejo:   barfQty('conejo'),
+      salmon:   barfQty('salmon') || barfQty('salmón'),
       gPollo:   barfQty('gato pollo') || barfQty('g.pll'),
       gTernera: barfQty('gato ternera') || barfQty('g.ter') || barfQty('ternera'),
-      salmon:   barfQty('salmon') || barfQty('salmón'),
-      conejo:   barfQty('conejo'),
       snacks:   snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - '),
       observaciones: [address, city, notes].filter(Boolean).join(' | '),
+      tipoPago: 'CX',
       orderNumber,
     }
 
