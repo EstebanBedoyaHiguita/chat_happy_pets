@@ -8,6 +8,16 @@ export interface BotOrderItem {
   image?: string
 }
 
+/** Estado del pedido ANTES de una edición, apilado por update_order para auditoría. */
+export interface BotOrderEdit {
+  editedAt: Date
+  editedBy: string
+  previousItems: BotOrderItem[]
+  previousSubtotal: number
+  previousTotal: number
+  reason?: string
+}
+
 export interface BotOrderDoc extends Document {
   orderNumber: string
   waId: string
@@ -25,6 +35,7 @@ export interface BotOrderDoc extends Document {
   }
   status: 'pending' | 'delivered' | 'cancelled'
   paid: boolean
+  editHistory: BotOrderEdit[]
   createdAt: Date
 }
 
@@ -58,6 +69,28 @@ const BotOrderSchema = new Schema<BotOrderDoc>(
       default: 'pending',
     },
     paid: { type: Boolean, default: false },
+    editHistory: {
+      type: [
+        {
+          editedAt: { type: Date, default: Date.now },
+          editedBy: { type: String, default: 'Bot' },
+          previousItems: [
+            {
+              name: { type: String, required: true },
+              price: { type: Number, required: true },
+              quantity: { type: Number, required: true },
+              lineTotal: { type: Number, required: true },
+              image: { type: String, default: '' },
+            },
+          ],
+          previousSubtotal: { type: Number, required: true },
+          previousTotal: { type: Number, required: true },
+          reason: { type: String, default: '' },
+          _id: false,
+        },
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 )

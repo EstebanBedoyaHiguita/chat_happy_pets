@@ -9,6 +9,8 @@ import {
   getShippingCost,
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
+import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
+import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
 let _openai: OpenAI | null = null
@@ -73,7 +75,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'create_order',
-      description: 'OBLIGATORIO: Registra el pedido en el sistema. DEBES llamar esta función cuando el cliente confirme el pedido. NUNCA escribas el resumen del pedido sin haber llamado esta función primero. Para cada producto en items, DEBES pasar el productId (_id del producto que obtuviste de get_products) — esto garantiza el precio correcto. Esta función retorna orderNumber, subtotal, shipping y total reales — usa SOLO esos valores en tu respuesta.',
+      description: 'OBLIGATORIO: Registra un pedido NUEVO en el sistema. DEBES llamar esta función cuando el cliente confirme el pedido. NUNCA escribas el resumen del pedido sin haber llamado esta función primero. Para cada producto en items, DEBES pasar el productId (_id del producto que obtuviste de get_products) — esto garantiza el precio correcto. Esta función retorna orderNumber, subtotal, shipping y total reales — usa SOLO esos valores en tu respuesta.\n\n⚠️ Si el cliente quiere MODIFICAR un pedido que ya hizo, NO uses esta función: usa update_order. Esta función rechaza el pedido si el cliente ya tiene uno pendiente sin pagar.',
       parameters: {
         type: 'object',
         properties: {
@@ -95,6 +97,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           department: { type: 'string', description: 'Departamento de la ciudad' },
           address: { type: 'string', description: 'Dirección exacta de entrega' },
           notes: { type: 'string', description: 'Notas adicionales del pedido (opcional)' },
+          confirmNewOrder: { type: 'boolean', description: 'Ponlo en true SOLO si el cliente ya tiene un pedido pendiente y confirmó explícitamente que quiere uno NUEVO y aparte, en vez de modificar el existente.' },
         },
         required: ['items', 'cityId', 'cityName', 'department', 'address'],
       },
@@ -104,10 +107,38 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'lookup_order',
-      description: 'Busca los pedidos existentes del cliente actual. DEBES llamar esta función cuando el cliente mencione que ya tiene un pedido, quiera pagar un pedido existente, pregunte por el estado de un pedido, o diga frases como "vengo a pagar", "quiero pagar mi pedido", "ya hice un pedido". NO crees un pedido nuevo en ese caso — primero busca el existente.',
+      description: 'Busca los pedidos existentes del cliente actual. DEBES llamar esta función cuando el cliente mencione que ya tiene un pedido, quiera pagar un pedido existente, quiera MODIFICAR o CAMBIAR un pedido, pregunte por el estado de un pedido, o diga frases como "vengo a pagar", "quiero pagar mi pedido", "ya hice un pedido", "quiero cambiar mi pedido", "agrégame", "quítame". NO crees un pedido nuevo en ese caso — primero busca el existente. Cada pedido retorna editable=true/false: si es false, NO se puede modificar y debes transferir a un asesor.',
       parameters: {
         type: 'object',
         properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_order',
+      description: 'Modifica los productos de un pedido existente que ya está registrado. Úsala cuando el cliente quiera agregar productos, quitar productos o cambiar cantidades de un pedido que ya hizo ("agrégame 2 de cordero", "quítame el pescado", "mejor que sean 5 de pollo", "quiero cambiar mi pedido").\n\n⚠️ ANTES de llamarla: llama lookup_order, muéstrale el pedido al cliente y CONFIRMA con él que ese es el pedido que quiere modificar. Nunca la llames sin esa confirmación.\n\n⚠️ items debe ser la lista COMPLETA y FINAL del pedido, no solo lo que cambia. Si el pedido tiene 3 pollo y el cliente pide agregar 2 cordero, envía items=[3x pollo, 2x cordero].\n\nNO sirve para cambiar dirección ni ciudad (eso se transfiere a un asesor) ni para cancelar el pedido. Retorna los totales reales y un objeto changes con lo que cambió — usa SOLO esos valores en tu respuesta.',
+      parameters: {
+        type: 'object',
+        properties: {
+          orderNumber: { type: 'string', description: 'Número del pedido a modificar (ej: WA-1784075433077), obtenido de lookup_order y confirmado con el cliente.' },
+          items: {
+            type: 'array',
+            description: 'Lista COMPLETA y final de productos que quedará en el pedido, incluyendo los que no cambiaron.',
+            items: {
+              type: 'object',
+              properties: {
+                productId: { type: 'string', description: '_id del producto obtenido de get_products. Inclúyelo siempre que lo tengas disponible para garantizar el precio correcto.' },
+                productName: { type: 'string', description: 'Nombre exacto del producto tal como aparece en el catálogo' },
+                quantity: { type: 'number', description: 'Cantidad final de este producto en el pedido' },
+              },
+              required: ['productName', 'quantity'],
+            },
+          },
+          reason: { type: 'string', description: 'Qué pidió cambiar el cliente, en pocas palabras (ej: "agregar 2 cordero"). Se guarda en el historial de ediciones.' },
+        },
+        required: ['orderNumber', 'items'],
       },
     },
   },
@@ -162,6 +193,28 @@ No esperes a tener todos los datos. Llámala con cada dato nuevo por separado si
   },
 ]
 
+interface EditableOrder {
+  orderNumber: string
+  items: PricedItem[]
+  subtotal: number
+  shipping: number
+  total: number
+  status: string
+  paid: boolean
+}
+
+/**
+ * Único lugar que define qué pedido puede tocar el agente: pendiente y sin pagar.
+ * Un pedido pagado, entregado o cancelado se transfiere a un asesor humano.
+ */
+async function findEditableOrder(waId?: string): Promise<EditableOrder | null> {
+  if (!waId) return null
+  const { BotOrder } = await import('./models/BotOrder')
+  const { connectDB } = await import('./mongodb')
+  await connectDB()
+  return BotOrder.findOne({ waId, status: 'pending', paid: false }).sort({ createdAt: -1 }).lean()
+}
+
 async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}, pendingSteps: string[] = []): Promise<string> {
   console.log('[Tool call]', name, JSON.stringify(args))
   try {
@@ -199,6 +252,19 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           })
         }
 
+        // Hard block: pedido duplicado. La regla equivalente ya existe en el prompt y aun así
+        // el agente creaba un segundo pedido cuando el cliente pedía modificar el anterior.
+        if (!args.confirmNewOrder) {
+          const existing = await findEditableOrder(waId)
+          if (existing) {
+            return JSON.stringify({
+              status: 'error',
+              instruction: `Este cliente YA tiene un pedido pendiente sin pagar: #${existing.orderNumber} (${existing.items.map((i: PricedItem) => `${i.quantity}x ${i.name}`).join(', ')} — total $${existing.total} COP).\n\nNO crees un pedido nuevo. Pregúntale al cliente:\n"Veo que ya tienes un pedido pendiente #${existing.orderNumber}:\n${existing.items.map((i: PricedItem) => `- ${i.quantity} x ${i.name}: $${i.lineTotal} COP`).join('\n')}\nTotal: $${existing.total} COP\n¿Quieres modificar ESE pedido o prefieres hacer uno nuevo aparte? 😊"\n\nEspera su respuesta:\n- Si quiere MODIFICARLO → llama update_order con orderNumber="${existing.orderNumber}".\n- Si confirma que quiere uno NUEVO y aparte → vuelve a llamar create_order con confirmNewOrder=true.`,
+              existingOrderNumber: existing.orderNumber,
+            })
+          }
+        }
+
         const [citiesRaw, freshProductsRaw] = await Promise.allSettled([
           getCities(),
           getProducts(),
@@ -231,62 +297,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           console.error('[create_order] getShippingCost error:', e)
         }
 
-        const productsResult = freshProductsRaw.status === 'fulfilled' ? freshProductsRaw.value : null
-        const freshList: Record<string, unknown>[] = Array.isArray(productsResult)
-          ? productsResult
-          : Array.isArray(productsResult?.data) ? productsResult.data : []
-
-        // Sin tildes: el agente escribe "Salmon"/"Albondigas" y el catálogo "Salmón"/"Albóndigas"
-        const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim()
-        // Palabras vacías que no aportan al match
-        const STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'para', 'una', 'uno', 'y', 'a'])
-        const keyWords = (s: string) => normalize(s).split(' ').filter(w => w.length > 2 && !STOPWORDS.has(w))
-
-        const items = ((args.items as { productId?: string; productName: string; quantity: number }[]) ?? []).map((item) => {
-          const search = normalize(item.productName)
-          const searchKeys = keyWords(item.productName)
-          // 1. Match by _id (most reliable)
-          let found = item.productId ? freshList.find((p) => String(p._id) === item.productId) : undefined
-          // 2. Fallback: exact name match only (no substring — "Pollo" ⊂ "Pollo Frutas" causes wrong match)
-          if (!found) {
-            found = freshList.find((p) => normalize(p.name as string) === search)
-          }
-          // 3. Fallback: best keyword match (highest overlap ratio, not just first ≥60%).
-          // Empates se resuelven por el producto con menos palabras propias sin cubrir:
-          // "Dieta Barf Pollo con Verdura" empata con "Dieta Barf Pollo" y "Dieta Barf Pollo
-          // Frutas" (3/4 cada uno), pero "Frutas" sobra → gana "Dieta Barf Pollo".
-          if (!found) {
-            let bestScore = 0
-            let bestExtras = Infinity
-            for (const p of freshList) {
-              const productKeys = keyWords(p.name as string)
-              const matches = searchKeys.filter(w => productKeys.some(pw => pw.includes(w) || w.includes(pw)))
-              const score = searchKeys.length > 0 ? matches.length / searchKeys.length : 0
-              if (score < 0.6) continue
-              const extras = productKeys.filter(pw => !searchKeys.some(w => pw.includes(w) || w.includes(pw))).length
-              if (score > bestScore || (score === bestScore && extras < bestExtras)) {
-                bestScore = score
-                bestExtras = extras
-                found = p
-              }
-            }
-          }
-          const img = Array.isArray(found?.images) ? (found!.images as string[])[0] : ''
-          const rawPrice = found?.price
-          const price = typeof rawPrice === 'number' ? rawPrice : typeof rawPrice === 'string' ? parseFloat(rawPrice) || 0 : 0
-          console.log(`[create_order] item="${item.productName}" id=${item.productId} → matched="${found?.name ?? 'NO MATCH'}" price=${price}`)
-          return {
-            // Nombre del catálogo, no el que escribió el agente: evita que un nombre inventado
-            // ("Dieta Barf Pollo con Verdura") llegue al resumen y a las columnas del Sheet.
-            name: (found?.name as string) ?? item.productName,
-            price,
-            quantity: item.quantity,
-            lineTotal: price * item.quantity,
-            image: img,
-          }
-        })
-
-        const subtotal = items.reduce((sum, i) => sum + i.lineTotal, 0)
+        const freshList = toProductList(freshProductsRaw.status === 'fulfilled' ? freshProductsRaw.value : null)
+        const items = priceItems(freshList, args.items as RequestedItem[], 'create_order')
+        const subtotal = sumSubtotal(items)
         const total = subtotal + shipping
 
         // Always include city in the stored address
@@ -327,62 +340,16 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           status: 'pending',
         })
         
-        // Map items to sheet columns by product name
-        const sheetNorm = (s: string) => s.toLowerCase()
-
-        // Classify by whether the name contains "barf" or "dieta" — snacks never do
-        const isBarf = (name: string) => sheetNorm(name).includes('barf') || sheetNorm(name).includes('dieta')
-        const barfItems = items.filter(i => isBarf(i.name))
-        const snackItems = items.filter(i => !isBarf(i.name))
-        const snacksText = snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - ')
-
-        const barfQty = (keywords: string[], excludes: string[] = []) => {
-          const item = barfItems.find(i => {
-            const n = sheetNorm(i.name)
-            return keywords.every(k => n.includes(k)) && excludes.every(e => !n.includes(e))
-          })
-          return item ? item.quantity : ''
-        }
-
-        const sheetPayload = {
-          fecha: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
-          celular: waId ?? '',
-          vend: 'Bot',
-          nombreCliente: roomData?.name ?? '',
-          pollo:    barfQty(['pollo'], ['fruta', 'gato']),
-          fruta:    barfQty(['fruta']),
-          cordero:  barfQty(['cordero']),
-          res:      barfQty(['res']),
-          pez:      barfQty(['pescado']) || barfQty(['pez']),
-          conejo:   barfQty(['conejo']),
-          salmon:   barfQty(['salmon']) || barfQty(['salmón']),
-          gPollo:   barfQty(['gato', 'pollo']),
-          gTernera: barfQty(['gato', 'ternera']),
-          snacks:   snacksText,
-          observaciones: [addressWithCity, args.notes].filter(Boolean).join(' | '),
-          tipoPago: 'CX',
+        // addressWithCity ya trae la ciudad, por eso city va vacío: evita repetirla en observaciones
+        sendToSheet(buildSheetPayload({
           orderNumber,
-        }
-
-        const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
-        if (webhookUrl) {
-          console.log('[Sheets webhook] enviando POST:', JSON.stringify(sheetPayload))
-          fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify(sheetPayload),
-          })
-            .then(async (sheetsRes) => {
-              const sheetsText = await sheetsRes.text().catch(() => '')
-              console.log('[Sheets webhook] status:', sheetsRes.status, 'body:', sheetsText.substring(0, 200))
-            })
-            .catch((err: unknown) => {
-              const msg = err instanceof Error ? err.message : String(err)
-              console.error('[Sheets webhook error]', msg)
-            })
-        } else {
-          console.warn('[Sheets webhook] GOOGLE_SHEETS_WEBHOOK no configurado')
-        }
+          customerPhone: waId ?? '',
+          customerName: roomData?.name ?? '',
+          items,
+          address: addressWithCity,
+          city: '',
+          notes: (args.notes as string) ?? '',
+        }, { action: 'create', vend: 'Bot' }))
 
         result = {
           success: true,
@@ -407,6 +374,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
             orders: orders.map(o => ({
               orderNumber: o.orderNumber,
               status: o.status,
+              paid: o.paid,
+              // Solo los editables pueden pasar por update_order; el resto va a asesor humano.
+              editable: o.status === 'pending' && !o.paid,
               items: o.items,
               subtotal: o.subtotal,
               shipping: o.shipping,
@@ -415,6 +385,90 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
               createdAt: o.createdAt,
             })),
           }
+        }
+        break
+      }
+      case 'update_order': {
+        const orderNumber = (args.orderNumber as string) ?? ''
+        if (!orderNumber) {
+          return JSON.stringify({
+            status: 'error',
+            instruction: 'Falta orderNumber. Llama lookup_order primero para obtener el número del pedido, confirma con el cliente cuál quiere modificar y vuelve a intentar.',
+          })
+        }
+
+        const { BotOrder } = await import('./models/BotOrder')
+        const { connectDB } = await import('./mongodb')
+        await connectDB()
+        const order = await BotOrder.findOne({ orderNumber, waId: waId ?? '' })
+
+        if (!order) {
+          return JSON.stringify({
+            status: 'error',
+            instruction: `No existe un pedido #${orderNumber} para este cliente. Llama lookup_order y confirma con el cliente cuál pedido quiere modificar.`,
+          })
+        }
+        // Alcance acordado: el agente solo toca pedidos pendientes sin pagar.
+        if (order.status !== 'pending' || order.paid) {
+          const motivo = order.paid ? 'ya está pagado' : `está ${order.status === 'delivered' ? 'entregado' : 'cancelado'}`
+          return JSON.stringify({
+            status: 'error',
+            instruction: `El pedido #${orderNumber} ${motivo}, así que NO puedes modificarlo. Dile al cliente: "Ese pedido ${motivo}, así que voy a pasarte con un asesor para que te ayude con el cambio 😊" y transfiere agregando en la ÚLTIMA línea: {"transfer":true,"reason":"modificación de pedido ${motivo}"}`,
+          })
+        }
+
+        const requested = (args.items as RequestedItem[]) ?? []
+        if (requested.length === 0) {
+          return JSON.stringify({
+            status: 'error',
+            instruction: 'items no puede ir vacío. Debes enviar la lista COMPLETA y final de productos que quedará en el pedido (no solo los que cambian). Si el cliente quiere cancelar el pedido completo, transfiere a un asesor.',
+          })
+        }
+
+        const freshList = toProductList(await getProducts())
+        const newItems = priceItems(freshList, requested, 'update_order')
+        const previousItems = order.items.map((i: PricedItem) => ({
+          name: i.name, price: i.price, quantity: i.quantity, lineTotal: i.lineTotal, image: i.image ?? '',
+        }))
+        const subtotal = sumSubtotal(newItems)
+        // El envío no se recalcula: la ciudad no se puede cambiar por este flujo.
+        const shipping = order.shipping
+        const total = subtotal + shipping
+        const diff = diffItems(previousItems, newItems)
+
+        order.editHistory.push({
+          editedAt: new Date(),
+          editedBy: 'Bot',
+          previousItems,
+          previousSubtotal: order.subtotal,
+          previousTotal: order.total,
+          reason: (args.reason as string) ?? '',
+        })
+        order.items = newItems
+        order.subtotal = subtotal
+        order.total = total
+        await order.save()
+
+        sendToSheet(buildSheetPayload({
+          orderNumber,
+          customerPhone: order.customerPhone ?? waId ?? '',
+          customerName: order.customerName ?? '',
+          items: newItems,
+          address: order.shippingAddress?.address ?? '',
+          city: '',
+          notes: order.shippingAddress?.notes ?? '',
+        }, { action: 'update' }))
+
+        result = {
+          success: true,
+          orderNumber,
+          subtotal,
+          shipping,
+          total,
+          items: newItems.map(i => ({ name: i.name, quantity: i.quantity, price: i.price, lineTotal: i.lineTotal })),
+          // Diff explícito para que el resumen al cliente diga qué cambió de verdad.
+          changes: diff,
+          instruction: 'Pedido actualizado. Muéstrale al cliente el resumen NUEVO usando EXACTAMENTE estos valores (mismo formato que un pedido nuevo, pero di "Pedido actualizado" en vez de "Pedido registrado"). NO repitas el mensaje de datos de pago si ya se lo enviaste antes en esta conversación.',
         }
         break
       }
@@ -790,6 +844,30 @@ Cuando el cliente diga "vengo a pagar", "quiero pagar mi pedido", "es para hacer
 3. Luego envía los datos de pago (transferencia bancaria).
 4. Espera que el cliente envíe el comprobante.
 NUNCA crees un pedido nuevo si ya existe uno para ese cliente.
+
+⚠️ REGLA CRÍTICA — MODIFICAR UN PEDIDO EXISTENTE:
+Cuando el cliente quiera cambiar algo de un pedido que YA hizo ("quiero modificar mi pedido", "agrégame 2 de cordero", "quítame el pescado", "mejor que sean 5", "me equivoqué en el pedido"):
+1. Llama lookup_order. NUNCA llames create_order en este caso: crearías un pedido duplicado.
+2. CONFIRMA CON EL CLIENTE cuál pedido es, mostrándole el resumen del más reciente:
+   "Encontré tu pedido #(orderNumber real):
+   - (quantity) x (name): $(lineTotal) COP
+   Total: $(total) COP
+   ¿Es ese el que quieres modificar? 😊"
+   ESPERA su respuesta. NO modifiques nada antes de que confirme.
+3. Cuando confirme, pregúntale qué quiere cambiar (si aún no te lo dijo).
+4. Llama update_order con orderNumber y la lista COMPLETA y FINAL de productos (los que quedan más los nuevos, no solo los que cambian).
+5. SOLO DESPUÉS de que update_order retorne, muestra el resumen nuevo con los valores EXACTOS que retornó:
+   ✅ Pedido actualizado #(orderNumber real)
+   - (quantity) x (name): $(lineTotal real) COP
+   Subtotal: $(subtotal real) COP
+   Envío: $(shipping real) COP
+   Total: $(total real) COP
+   Si ya le enviaste los datos de pago antes, NO los repitas: solo confirma el cambio y el total nuevo.
+
+⛔ LO QUE NO PUEDES MODIFICAR — TRANSFIERE A UN ASESOR:
+Solo puedes cambiar productos y cantidades. Si el cliente pide CUALQUIER otra cosa sobre un pedido existente — cambiar la dirección, cambiar la ciudad, cancelar el pedido, cambiar la fecha de entrega, o modificar un pedido que ya pagó — NO lo intentes y NO uses ninguna herramienta. Respóndele con calidez y transfiere:
+   "Claro que sí 😊 Para ese cambio te voy a pasar con un asesor del equipo que te ayuda enseguida 🐾"
+   {"transfer":true,"reason":"solicitud de cambio en pedido (dirección/cancelación) que requiere asesor"}
 
 ⚠️ REGLA CRÍTICA — COMPROBANTE DE PAGO:
 Cuando el cliente envíe una imagen después de hablar de pago:

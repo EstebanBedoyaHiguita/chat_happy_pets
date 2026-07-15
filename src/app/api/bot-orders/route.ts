@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
 import { BotOrder } from '@/lib/models/BotOrder'
+import { buildSheetPayload, sendToSheet } from '@/lib/sheet-payload'
 import { cookies } from 'next/headers'
 
 export async function GET() {
@@ -47,47 +48,16 @@ export async function POST(req: NextRequest) {
     status: 'pending',
   })
 
-  // Send to Google Sheets
-  const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK
-  if (webhookUrl) {
-    const sheetNorm = (s: string) => s.toLowerCase()
-    const isBarf = (name: string) => sheetNorm(name).includes('barf') || sheetNorm(name).includes('dieta')
-    const barfItems = orderItems.filter(i => isBarf(i.name))
-    const snackItems = orderItems.filter(i => !isBarf(i.name))
-    const barfQty = (keywords: string[], excludes: string[] = []) => {
-      const item = barfItems.find(i => {
-        const n = sheetNorm(i.name)
-        return keywords.every(k => n.includes(k)) && excludes.every(e => !n.includes(e))
-      })
-      return item ? item.quantity : ''
-    }
-
-    const sheetPayload = {
-      fecha: new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' }),
-      celular: customerPhone ?? '',
-      vend: agentName,
-      nombreCliente: customerName,
-      pollo:    barfQty(['pollo'], ['fruta', 'gato']),
-      fruta:    barfQty(['fruta']),
-      cordero:  barfQty(['cordero']),
-      res:      barfQty(['res']),
-      pez:      barfQty(['pescado']) || barfQty(['pez']),
-      conejo:   barfQty(['conejo']),
-      salmon:   barfQty(['salmon']) || barfQty(['salmón']),
-      gPollo:   barfQty(['gato', 'pollo']),
-      gTernera: barfQty(['gato', 'ternera']),
-      snacks:   snackItems.map(i => `${i.quantity}x ${i.name}`).join(' - '),
-      observaciones: [address, city, notes].filter(Boolean).join(' | '),
-      tipoPago: 'CX',
-      orderNumber,
-    }
-
-    fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(sheetPayload),
-    }).catch(console.error)
-  }
+  // Mismas columnas que antes: la lógica vive ahora en sheet-payload.ts, compartida con el bot.
+  sendToSheet(buildSheetPayload({
+    orderNumber,
+    customerPhone: customerPhone ?? '',
+    customerName,
+    items: orderItems,
+    address,
+    city,
+    notes,
+  }, { action: 'create', vend: agentName }))
 
   return NextResponse.json({ success: true, orderNumber }, { status: 201 })
   } catch (err) {
