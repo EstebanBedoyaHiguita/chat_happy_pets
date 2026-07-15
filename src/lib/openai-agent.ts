@@ -236,7 +236,8 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           ? productsResult
           : Array.isArray(productsResult?.data) ? productsResult.data : []
 
-        const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
+        // Sin tildes: el agente escribe "Salmon"/"Albondigas" y el catálogo "Salmón"/"Albóndigas"
+        const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim()
         // Palabras vacías que no aportan al match
         const STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'para', 'una', 'uno', 'y', 'a'])
         const keyWords = (s: string) => normalize(s).split(' ').filter(w => w.length > 2 && !STOPWORDS.has(w))
@@ -250,15 +251,22 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           if (!found) {
             found = freshList.find((p) => normalize(p.name as string) === search)
           }
-          // 3. Fallback: best keyword match (highest overlap ratio, not just first ≥60%)
+          // 3. Fallback: best keyword match (highest overlap ratio, not just first ≥60%).
+          // Empates se resuelven por el producto con menos palabras propias sin cubrir:
+          // "Dieta Barf Pollo con Verdura" empata con "Dieta Barf Pollo" y "Dieta Barf Pollo
+          // Frutas" (3/4 cada uno), pero "Frutas" sobra → gana "Dieta Barf Pollo".
           if (!found) {
             let bestScore = 0
+            let bestExtras = Infinity
             for (const p of freshList) {
               const productKeys = keyWords(p.name as string)
               const matches = searchKeys.filter(w => productKeys.some(pw => pw.includes(w) || w.includes(pw)))
               const score = searchKeys.length > 0 ? matches.length / searchKeys.length : 0
-              if (score > bestScore && score >= 0.6) {
+              if (score < 0.6) continue
+              const extras = productKeys.filter(pw => !searchKeys.some(w => pw.includes(w) || w.includes(pw))).length
+              if (score > bestScore || (score === bestScore && extras < bestExtras)) {
                 bestScore = score
+                bestExtras = extras
                 found = p
               }
             }
@@ -268,7 +276,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           const price = typeof rawPrice === 'number' ? rawPrice : typeof rawPrice === 'string' ? parseFloat(rawPrice) || 0 : 0
           console.log(`[create_order] item="${item.productName}" id=${item.productId} → matched="${found?.name ?? 'NO MATCH'}" price=${price}`)
           return {
-            name: item.productName,
+            // Nombre del catálogo, no el que escribió el agente: evita que un nombre inventado
+            // ("Dieta Barf Pollo con Verdura") llegue al resumen y a las columnas del Sheet.
+            name: (found?.name as string) ?? item.productName,
             price,
             quantity: item.quantity,
             lineTotal: price * item.quantity,
