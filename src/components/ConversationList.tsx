@@ -1,6 +1,7 @@
 'use client'
 
 import type { IConversation, ConversationStatus } from '@/types'
+import ChannelAvatar from './ChannelAvatar'
 
 interface Props {
   conversations: IConversation[]
@@ -107,17 +108,13 @@ export default function ConversationList({
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                {/* Avatar */}
-                <div className="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center text-sm font-semibold text-white flex-shrink-0">
-                  {conv.name.charAt(0).toUpperCase()}
-                </div>
+                {/* Avatar: logo del canal por el que escribe el cliente */}
+                <ChannelAvatar channel={conv.channel} />
 
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-medium text-white truncate">{conv.name}</span>
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[conv.status]}`} />
-                    {conv.channel === 'messenger' && <span title="Messenger" className="text-xs">💬</span>}
-                    {conv.channel === 'instagram' && <span title="Instagram" className="text-xs">📸</span>}
                   </div>
                   <p className="text-xs text-gray-400 truncate">{conv.lastMessage || '—'}</p>
                 </div>

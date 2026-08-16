@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { IRoom, IMessage, ICloseReason } from '@/types'
 import MessageBubble from './MessageBubble'
+import ChannelAvatar from './ChannelAvatar'
 
 interface Props {
   conversation: IRoom
@@ -229,14 +230,10 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
             onClick={() => showContactCard ? setShowContactCard(false) : handleOpenContactCard()}
             className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
           >
-            <div className="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center text-white font-semibold">
-              {conversation.name.charAt(0).toUpperCase()}
-            </div>
+            <ChannelAvatar channel={conversation.channel} />
             <div>
-              <h3 className="text-white font-medium text-sm underline decoration-dotted flex items-center gap-1.5">
+              <h3 className="text-white font-medium text-sm underline decoration-dotted">
                 {conversation.name}
-                {conversation.channel === 'messenger' && <span title="Messenger">💬</span>}
-                {conversation.channel === 'instagram' && <span title="Instagram">📸</span>}
               </h3>
               <p className="text-gray-400 text-xs">{conversation.phone || conversation.username || ""}</p>
             </div>
@@ -337,9 +334,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
 
           {/* Avatar + name */}
           <div className="flex flex-col items-center gap-2 py-5 border-b border-gray-800">
-            <div className="w-14 h-14 rounded-full bg-gray-700 flex items-center justify-center text-white text-2xl font-bold">
-              {conversation.name.charAt(0).toUpperCase()}
-            </div>
+            <ChannelAvatar channel={conversation.channel} size={56} />
             <p className="text-white font-medium text-sm">{conversation.name}</p>
             <p className="text-gray-500 text-xs">{conversation.phone || conversation.username || ""}</p>
           </div>
