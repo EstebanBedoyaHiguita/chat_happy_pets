@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
     query.$or = [
       { name: { $regex: search, $options: 'i' } },
       { phone: { $regex: search, $options: 'i' } },
+      { username: { $regex: search, $options: 'i' } },
     ]
   }
 

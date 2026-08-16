@@ -10,6 +10,8 @@ export interface IRoom {
   channel: ChannelType
   name: string
   phone: string
+  waUserId?: string
+  username?: string
   petName: string
   petType: string
   petAge: string

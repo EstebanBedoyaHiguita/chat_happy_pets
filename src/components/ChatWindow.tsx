@@ -238,7 +238,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
                 {conversation.channel === 'messenger' && <span title="Messenger">💬</span>}
                 {conversation.channel === 'instagram' && <span title="Instagram">📸</span>}
               </h3>
-              <p className="text-gray-400 text-xs">{conversation.phone}</p>
+              <p className="text-gray-400 text-xs">{conversation.phone || conversation.username || ""}</p>
             </div>
           </button>
 
@@ -341,7 +341,7 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
               {conversation.name.charAt(0).toUpperCase()}
             </div>
             <p className="text-white font-medium text-sm">{conversation.name}</p>
-            <p className="text-gray-500 text-xs">{conversation.phone}</p>
+            <p className="text-gray-500 text-xs">{conversation.phone || conversation.username || ""}</p>
           </div>
 
           <div className="flex flex-col gap-0 px-4 py-4">

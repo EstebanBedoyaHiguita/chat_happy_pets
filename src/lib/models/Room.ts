@@ -8,6 +8,8 @@ export interface RoomDoc extends Document {
   channel: ChannelType
   name: string
   phone: string
+  waUserId?: string   // BSUID de Meta (usuarios con username, sin teléfono visible)
+  username?: string   // @username de WhatsApp
   petName: string
   petType: string
   petAge: string
@@ -50,7 +52,9 @@ const RoomSchema = new Schema<RoomDoc>(
     waId: { type: String, required: true, unique: true },
     channel: { type: String, enum: ['whatsapp', 'messenger', 'instagram'], default: 'whatsapp' },
     name: { type: String, default: 'Desconocido' },
-    phone: { type: String, required: true },
+    phone: { type: String, default: '' },
+    waUserId: { type: String, index: true, sparse: true },
+    username: { type: String },
     petName: { type: String, default: '' },
     petType: { type: String, default: '' },
     petAge: { type: String, default: '' },

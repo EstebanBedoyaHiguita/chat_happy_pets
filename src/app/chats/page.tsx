@@ -42,7 +42,7 @@ export default function ChatsPage() {
     if (filter !== 'all' && c.status !== filter) return false
     if (search) {
       const q = search.toLowerCase()
-      return c.name.toLowerCase().includes(q) || c.phone?.toLowerCase().includes(q)
+      return c.name.toLowerCase().includes(q) || c.phone?.toLowerCase().includes(q) || c.username?.toLowerCase().includes(q)
     }
     return true
   })

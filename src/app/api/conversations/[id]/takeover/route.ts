@@ -85,6 +85,7 @@ async function resumeBot(roomId: string) {
 
   const roomData: RoomKnownData = {
     name: room.name,
+    phone: room.phone || undefined,
     petName: room.petName || undefined,
     petType: room.petType || undefined,
     petAge: room.petAge || undefined,
@@ -126,15 +127,18 @@ async function resumeBot(roomId: string) {
 
   const { cleanText } = extractImageUrls(agentResponse.text)
 
+  // En WhatsApp waId es el teléfono, o el BSUID si el usuario ocultó su número
+  const recipientId = room.channel === 'whatsapp' ? (room.phone || room.waId) : room.phone
+
   if (agentResponse.products.length > 0) {
     for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
       const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
       const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
       let waMessageId: string | null = null
       if (product.imageUrl) {
-        waMessageId = await sendChannelImage(room.channel, room.phone, product.imageUrl, caption)
+        waMessageId = await sendChannelImage(room.channel, recipientId, product.imageUrl, caption)
       } else {
-        waMessageId = await sendChannelMessage(room.channel, room.phone, caption)
+        waMessageId = await sendChannelMessage(room.channel, recipientId, caption)
       }
       await Message.create({
         roomId: room._id,
@@ -146,7 +150,7 @@ async function resumeBot(roomId: string) {
       })
     }
   } else {
-    const waMessageId = await sendChannelMessage(room.channel, room.phone, cleanText)
+    const waMessageId = await sendChannelMessage(room.channel, recipientId, cleanText)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',

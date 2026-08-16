@@ -83,7 +83,9 @@ export async function GET(req: NextRequest) {
     const text = MESSAGES[stageToSend](clientName, petName)
 
     try {
-      const waMessageId = await sendChannelMessage(room.channel, room.phone, text)
+      // En WhatsApp waId es el teléfono, o el BSUID si el usuario ocultó su número
+      const recipientId = room.channel === 'whatsapp' ? (room.phone || room.waId) : room.phone
+      const waMessageId = await sendChannelMessage(room.channel, recipientId, text)
 
       await Message.create({
         roomId: room._id,

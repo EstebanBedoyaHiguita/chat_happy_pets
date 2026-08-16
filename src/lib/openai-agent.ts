@@ -96,6 +96,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           cityName: { type: 'string', description: 'Nombre de la ciudad elegida' },
           department: { type: 'string', description: 'Departamento de la ciudad' },
           address: { type: 'string', description: 'Dirección exacta de entrega' },
+          phone: { type: 'string', description: 'Celular de contacto del cliente (10 dígitos, empieza por 3). OBLIGATORIO si en DATOS QUE YA CONOCES no aparece "Celular del cliente": en ese caso pídeselo al cliente antes de llamar esta función. Si ya aparece, no lo pidas de nuevo ni lo envíes.' },
           notes: { type: 'string', description: 'Notas adicionales del pedido (opcional)' },
           confirmNewOrder: { type: 'boolean', description: 'Ponlo en true SOLO si el cliente ya tiene un pedido pendiente y confirmó explícitamente que quiere uno NUEVO y aparte, en vez de modificar el existente.' },
         },
@@ -169,6 +170,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 3. Edad y peso: en cuanto los mencione, llama esta función.
 4. Dirección: en cuanto el cliente dé la dirección de entrega (ya sea durante el pedido o en cualquier momento), llama esta función con address antes de continuar.
 5. Nombre del cliente: en cuanto lo mencione.
+6. Celular: si el cliente da un número de contacto, llama esta función con phone de inmediato.
 No esperes a tener todos los datos. Llámala con cada dato nuevo por separado si es necesario.`,
       parameters: {
         type: 'object',
@@ -187,11 +189,25 @@ No esperes a tener todos los datos. Llámala con cada dato nuevo por separado si
           pet3Age: { type: 'string', description: 'Edad de la mascota 3' },
           pet3Weight: { type: 'string', description: 'Peso de la mascota 3' },
           address: { type: 'string', description: 'Direccion de entrega' },
+          phone: { type: 'string', description: 'Celular de contacto del cliente (10 dígitos, empieza por 3)' },
         },
       },
     },
   },
 ]
+
+/**
+ * Deja el celular en el mismo formato que usa WhatsApp (57XXXXXXXXXX).
+ * Devuelve '' si no es un móvil colombiano válido — así un BSUID, una cédula
+ * o un número mal dictado nunca terminan como teléfono de entrega.
+ */
+export function normalizeColombianPhone(value?: string): string {
+  if (!value) return ''
+  const digits = String(value).replace(/\D/g, '')
+  if (/^3\d{9}$/.test(digits)) return `57${digits}`
+  if (/^573\d{9}$/.test(digits)) return digits
+  return ''
+}
 
 interface EditableOrder {
   orderNumber: string
@@ -249,6 +265,19 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           return JSON.stringify({
             status: 'error',
             instruction: 'NO puedes crear el pedido todavía. DEBES preguntarle al cliente su nombre primero. Pregúntale: "Antes de confirmar, ¿me puedes dar tu nombre?" y espera su respuesta. Llama update_customer_info con el nombre antes de intentar create_order de nuevo.',
+          })
+        }
+
+        // Hard block: sin celular no hay entrega. Los clientes que ocultan su número con
+        // username de WhatsApp no traen teléfono en el webhook, así que hay que pedírselo.
+        const customerPhone = normalizeColombianPhone(roomData?.phone) || normalizeColombianPhone(args.phone as string | undefined)
+        if (!customerPhone) {
+          const gaveInvalid = Boolean(args.phone)
+          return JSON.stringify({
+            status: 'error',
+            instruction: gaveInvalid
+              ? 'El número que te dieron no es un celular colombiano válido. NO crees el pedido. Dile al cliente: "Ese número no me aparece válido 😅 ¿Me lo confirmas? Deben ser 10 dígitos y empezar por 3." Espera el número correcto, guárdalo con update_customer_info y vuelve a llamar create_order.'
+              : 'NO puedes crear el pedido todavía. FALTA el celular de contacto para la entrega. Pregúntale al cliente: "Para coordinar la entrega, ¿a qué número de celular te podemos contactar? 📱" Espera su respuesta, guárdalo con update_customer_info (phone) y vuelve a llamar create_order pasando ese número en phone.',
           })
         }
 
@@ -310,11 +339,14 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           : rawAddress
 
         // Persist the full address (with city) to room and customer
-        if (waId && addressWithCity) {
+        if (waId && (addressWithCity || customerPhone)) {
           const { Room } = await import('./models/Room')
           const { Customer } = await import('./models/Customer')
-          await Room.updateOne({ waId }, { $set: { address: addressWithCity } })
-          await Customer.findOneAndUpdate({ waId }, { $set: { address: addressWithCity } }, { upsert: true, new: true, setDefaultsOnInsert: true })
+          const contactUpdate: Record<string, string> = {}
+          if (addressWithCity) contactUpdate.address = addressWithCity
+          if (customerPhone) contactUpdate.phone = customerPhone
+          await Room.updateOne({ waId }, { $set: contactUpdate })
+          await Customer.findOneAndUpdate({ waId }, { $set: contactUpdate }, { upsert: true, new: true, setDefaultsOnInsert: true })
         }
 
         const { BotOrder } = await import('./models/BotOrder')
@@ -326,7 +358,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           orderNumber,
           waId: waId ?? '',
           customerName: roomData?.name ?? '',
-          customerPhone: waId ?? '',
+          customerPhone,
           items,
           subtotal,
           shipping,
@@ -343,7 +375,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         // addressWithCity ya trae la ciudad, por eso city va vacío: evita repetirla en observaciones
         sendToSheet(buildSheetPayload({
           orderNumber,
-          customerPhone: waId ?? '',
+          customerPhone,
           customerName: roomData?.name ?? '',
           items,
           address: addressWithCity,
@@ -484,6 +516,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           for (const f of fields) {
             if (args[f]) update[f] = args[f] as string
           }
+          // El celular solo se guarda si es un móvil colombiano válido
+          const phone = normalizeColombianPhone(args.phone as string | undefined)
+          if (phone) update.phone = phone
           if (Object.keys(update).length > 0) {
             await Room.updateOne({ waId }, { $set: update })
             await Customer.findOneAndUpdate(
@@ -580,6 +615,7 @@ export interface AgentResponse {
 
 export interface RoomKnownData {
   name?: string
+  phone?: string
   petName?: string
   petType?: string
   petAge?: string
@@ -647,6 +683,8 @@ export async function runAgent(
 
   const knownLines: string[] = []
   if (roomData.name && roomData.name !== 'Desconocido') knownLines.push(`- Nombre del cliente: ${roomData.name}`)
+  const knownPhone = normalizeColombianPhone(roomData.phone)
+  if (knownPhone) knownLines.push(`- Celular del cliente: ${knownPhone}`)
   if (roomData.address) knownLines.push(`- Dirección de entrega: ${roomData.address}`)
   if (roomData.petType || roomData.petName) knownLines.push(`- Mascota 1: ${[roomData.petType, roomData.petName, roomData.petAge, roomData.petWeight].filter(Boolean).join(', ')}`)
   if (roomData.pet2Type || roomData.pet2Name) knownLines.push(`- Mascota 2: ${[roomData.pet2Type, roomData.pet2Name, roomData.pet2Age, roomData.pet2Weight].filter(Boolean).join(', ')}`)
@@ -663,7 +701,14 @@ SALUDO SEGÚN TIPO DE CLIENTE:
 - NUNCA uses "Desconocido" como nombre. Si no tienes nombre, saluda sin él.
 - NUNCA uses "Desconocido" como nombre.
 
-⚠️ REGLA CRÍTICA — DATOS DE MASCOTA ANTES DE PRODUCTOS:
+${knownPhone ? '' : `⚠️ REGLA CRÍTICA — CELULAR DE CONTACTO OBLIGATORIO:
+De este cliente NO tenemos su número de celular (no aparece en DATOS QUE YA CONOCES). Sin celular el domiciliario no puede entregar el pedido.
+- Cuando el cliente vaya a hacer un pedido, pídele el celular junto con los datos de entrega: "Para coordinar la entrega, ¿me regalas tu número de celular? 📱"
+- En cuanto te lo dé, llama update_customer_info con phone y pásalo también en phone al llamar create_order.
+- Deben ser 10 dígitos y empezar por 3. Si te dan algo distinto, pídelo de nuevo amablemente.
+- NO pidas el celular al inicio de la conversación ni lo repitas si ya te lo dieron: solo cuando estés recopilando los datos del pedido.
+
+`}⚠️ REGLA CRÍTICA — DATOS DE MASCOTA ANTES DE PRODUCTOS:
 Si NO tienes el tipo, nombre, edad Y peso de al menos una mascota, es OBLIGATORIO recopilarlos ANTES de mostrar cualquier producto o continuar el flujo de pedido. Esto aplica SIEMPRE, incluso si el cliente dice "sí" a ver los productos.
 
 Sigue este flujo de dos pasos:

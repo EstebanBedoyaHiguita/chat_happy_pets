@@ -3,6 +3,23 @@ const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN
 const API_VERSION = 'v25.0'
 const BASE_URL = `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`
 
+// Business-Scoped User ID (BSUID): identificador que Meta envía cuando el usuario
+// configuró un username y su teléfono ya no viene en el webhook. Formato: "CO.1A2B3C4D..."
+// Los usuarios sin username siguen llegando con teléfono y se manejan igual que siempre.
+const BSUID_REGEX = /^[A-Za-z]{2}\.[A-Za-z0-9]+$/
+
+export function isBsuid(id: string): boolean {
+  return BSUID_REGEX.test(id)
+}
+
+// Un teléfono va en `to` (comportamiento de siempre); un BSUID va en `recipient`,
+// porque `to` solo acepta números telefónicos.
+function recipientFields(id: string): Record<string, string> {
+  return isBsuid(id)
+    ? { recipient: id }
+    : { recipient_type: 'individual', to: id }
+}
+
 async function sendToWhatsApp(payload: Record<string, unknown>): Promise<string | null> {
   if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
     console.error('WhatsApp credentials not configured')
@@ -47,8 +64,7 @@ export async function markWhatsAppMessageRead(messageId: string): Promise<void> 
 export async function sendWhatsAppMessage(to: string, text: string): Promise<string | null> {
   return sendToWhatsApp({
     messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to,
+    ...recipientFields(to),
     type: 'text',
     text: { body: text },
   })
@@ -57,8 +73,7 @@ export async function sendWhatsAppMessage(to: string, text: string): Promise<str
 export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: string): Promise<string | null> {
   return sendToWhatsApp({
     messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to,
+    ...recipientFields(to),
     type: 'image',
     image: { link: imageUrl, ...(caption ? { caption } : {}) },
   })
@@ -133,8 +148,7 @@ export async function sendWhatsAppTemplate(
   }
   const payload = {
     messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to,
+    ...recipientFields(to),
     type: 'template',
     template: {
       name: templateName,
@@ -170,7 +184,10 @@ export interface AdReferral {
 }
 
 export interface IncomingWhatsAppMessage {
-  from: string
+  from: string        // Identificador para responder: teléfono si viene, si no el BSUID
+  phone?: string      // Teléfono real (ausente si el usuario ocultó su número con username)
+  userId?: string     // BSUID (Meta lo envía siempre desde 2026)
+  username?: string   // @username de WhatsApp, si lo configuró
   name: string
   text: string
   messageId: string
@@ -206,9 +223,20 @@ export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhat
       adTitle: (adsCtx?.ad_title as string | undefined) ?? (ref.headline as string | undefined),
     } : undefined
 
+    // Identidad del remitente: el teléfono puede faltar si el usuario tiene username.
+    // En ese caso Meta envía el BSUID en from_user_id (mensaje) o user_id (contacto).
+    const phone = (message.from as string | undefined) || (contact?.wa_id as string | undefined)
+    const userId = (message.from_user_id as string | undefined) || (contact?.user_id as string | undefined)
+    const username = profile?.username as string | undefined
+    const sender = phone || userId
+    if (!sender) return null
+
     const base = {
-      from: message.from as string,
-      name: (profile?.name as string) ?? 'Desconocido',
+      from: sender,
+      phone,
+      userId,
+      username,
+      name: (profile?.name as string) || (username ? username.replace(/^@/, '') : '') || 'Desconocido',
       messageId: message.id as string,
       timestamp: message.timestamp as string,
       channel: 'whatsapp' as const,

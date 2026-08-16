@@ -81,6 +81,9 @@ const UNSUPPORTED_MEDIA_MSG = 'Lo siento, por el momento no puedo procesar este 
 
 async function processMessage(parsed: {
   from: string
+  phone?: string
+  userId?: string
+  username?: string
   name: string
   text: string
   messageId: string
@@ -101,8 +104,12 @@ async function processMessage(parsed: {
   if (existing) return
 
   // Get or create room — key is channel:senderId to allow same person on multiple channels
+  // En WhatsApp la clave es el teléfono cuando viene; si el usuario ocultó su número con
+  // username, se usa el BSUID que Meta envía en su lugar.
   const roomKey = parsed.channel === 'whatsapp' ? parsed.from : `${parsed.channel}:${parsed.from}`
   let room = await Room.findOne({ waId: roomKey })
+  // Conversación abierta antes con teléfono y que ahora llega solo con BSUID (o al revés)
+  if (!room && parsed.userId) room = await Room.findOne({ waUserId: parsed.userId })
   const adFields = parsed.referral ? {
     adSource: parsed.referral.sourceType ?? 'ad',
     adId: parsed.referral.sourceId,
@@ -117,7 +124,9 @@ async function processMessage(parsed: {
       waId: roomKey,
       channel: parsed.channel,
       name: parsed.name,
-      phone: parsed.from,
+      phone: parsed.phone ?? (parsed.channel === 'whatsapp' ? '' : parsed.from),
+      waUserId: parsed.userId,
+      username: parsed.username,
       status: 'bot',
       lastMessage: parsed.text,
       lastMessageAt: new Date(),
@@ -128,7 +137,7 @@ async function processMessage(parsed: {
     })
     await Customer.findOneAndUpdate(
       { waId: roomKey },
-      { $setOnInsert: { name: parsed.name, phone: parsed.from, ...adFields } },
+      { $setOnInsert: { name: parsed.name, phone: parsed.phone ?? '', ...adFields } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )
   } else {
@@ -139,8 +148,17 @@ async function processMessage(parsed: {
     room.unreadCount += 1
     room.proactiveStage = 0
     if (room.name === 'Desconocido' && parsed.name !== 'Desconocido') room.name = parsed.name
+    // Completar identidad que Meta pueda haber agregado después (BSUID / username / teléfono)
+    if (parsed.userId && !room.waUserId) room.waUserId = parsed.userId
+    if (parsed.username && room.username !== parsed.username) room.username = parsed.username
+    if (parsed.phone && !room.phone) room.phone = parsed.phone
     await room.save()
   }
+
+  // Destino de las respuestas: teléfono si lo conocemos, si no el BSUID guardado en waId.
+  // Clave de la sala: la del documento (puede diferir de roomKey si la sala se encontró por BSUID).
+  const replyTo = parsed.channel === 'whatsapp' ? (room.phone || room.waId) : parsed.from
+  const roomWaId = room.waId
 
   // mediaUrl = URL stored in DB for display in chat (proxy endpoint)
   // visionUrl = base64 data URL sent to GPT-4o Vision (OpenAI can't access private endpoints)
@@ -205,7 +223,7 @@ async function processMessage(parsed: {
 
   // Video: canned response (bot can't interpret video, but it's stored for human agents)
   if (parsed.mediaType === 'video') {
-    const waId = await sendChannelMessage(parsed.channel, parsed.from, UNSUPPORTED_MEDIA_MSG)
+    const waId = await sendChannelMessage(parsed.channel, replyTo, UNSUPPORTED_MEDIA_MSG)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
@@ -222,7 +240,7 @@ async function processMessage(parsed: {
 
   // Audio without transcription: canned response
   if (parsed.mediaType === 'audio' && !audioTranscription) {
-    const waId = await sendChannelMessage(parsed.channel, parsed.from, UNSUPPORTED_MEDIA_MSG)
+    const waId = await sendChannelMessage(parsed.channel, replyTo, UNSUPPORTED_MEDIA_MSG)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
@@ -244,7 +262,7 @@ async function processMessage(parsed: {
   if (keywordCheck.triggered) {
     room.status = 'human'
     await room.save()
-    await sendChannelMessage(parsed.channel, parsed.from, 'En este momento te voy a conectar con un asesor humano. Por favor espera un momento. 🙏')
+    await sendChannelMessage(parsed.channel, replyTo, 'En este momento te voy a conectar con un asesor humano. Por favor espera un momento. 🙏')
     return
   }
 
@@ -275,6 +293,7 @@ async function processMessage(parsed: {
 
   const roomData: RoomKnownData = {
     name: room.name,
+    phone: room.phone || undefined,
     petName: room.petName || undefined,
     petType: room.petType || undefined,
     petAge: room.petAge || undefined,
@@ -308,7 +327,7 @@ async function processMessage(parsed: {
     config.aiModel,
     config.temperature,
     room.contextSummary ?? '',
-    parsed.from,
+    roomWaId,
     roomData,
     visionUrl,
     pendingSteps.length > 0 ? pendingSteps : undefined
@@ -322,9 +341,9 @@ async function processMessage(parsed: {
       const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
       const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
       if (product.imageUrl) {
-        waMessageId = await sendChannelImage(parsed.channel, parsed.from, product.imageUrl, caption)
+        waMessageId = await sendChannelImage(parsed.channel, replyTo, product.imageUrl, caption)
       } else {
-        waMessageId = await sendChannelMessage(parsed.channel, parsed.from, caption)
+        waMessageId = await sendChannelMessage(parsed.channel, replyTo, caption)
       }
       await Message.create({
         roomId: room._id,
@@ -336,7 +355,7 @@ async function processMessage(parsed: {
       })
     }
   } else {
-    waMessageId = await sendChannelMessage(parsed.channel, parsed.from, cleanText)
+    waMessageId = await sendChannelMessage(parsed.channel, replyTo, cleanText)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
@@ -379,7 +398,7 @@ async function processMessage(parsed: {
     room.status = 'human'
     const isPaymentReceipt = agentResponse.transferReason?.toLowerCase().includes('comprobante')
     if (!isPaymentReceipt) {
-      await sendChannelMessage(parsed.channel, parsed.from, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
+      await sendChannelMessage(parsed.channel, replyTo, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
     }
   }
 
