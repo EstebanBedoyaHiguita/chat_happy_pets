@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
-import { sendChannelMessage } from '@/lib/whatsapp'
+import { sendChannelMessage, channelRecipientId } from '@/lib/whatsapp'
 import { cookies } from 'next/headers'
 
 export async function POST(
@@ -23,7 +23,7 @@ export async function POST(
   if (!room) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const channel = (room.channel ?? 'whatsapp') as 'whatsapp' | 'messenger' | 'instagram'
-  const recipientId = channel === 'whatsapp' ? room.waId : room.phone
+  const recipientId = channelRecipientId(room)
   const waMessageId = await sendChannelMessage(channel, recipientId, text)
 
   const message = await Message.create({

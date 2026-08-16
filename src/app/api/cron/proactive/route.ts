@@ -3,7 +3,7 @@ import { connectDB } from '@/lib/mongodb'
 import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { BotOrder } from '@/lib/models/BotOrder'
-import { sendChannelMessage } from '@/lib/whatsapp'
+import { sendChannelMessage, channelRecipientId } from '@/lib/whatsapp'
 
 const MESSAGES = [
   // Stage 1 — 1 hour
@@ -83,8 +83,7 @@ export async function GET(req: NextRequest) {
     const text = MESSAGES[stageToSend](clientName, petName)
 
     try {
-      // En WhatsApp waId es el teléfono, o el BSUID si el usuario ocultó su número
-      const recipientId = room.channel === 'whatsapp' ? (room.phone || room.waId) : room.phone
+      const recipientId = channelRecipientId(room)
       const waMessageId = await sendChannelMessage(room.channel, recipientId, text)
 
       await Message.create({

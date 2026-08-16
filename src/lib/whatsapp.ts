@@ -279,11 +279,34 @@ const META_PAGE_TOKEN = process.env.META_PAGE_ACCESS_TOKEN
 const INSTAGRAM_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN
 const INSTAGRAM_BUSINESS_ID = process.env.INSTAGRAM_BUSINESS_ID
 
-function getMetaConfig(channel: 'messenger' | 'instagram') {
+/**
+ * El token de Instagram vive en Mongo porque se renueva solo cada 60 días
+ * (ver /api/cron/refresh-instagram-token). La variable de entorno es la semilla
+ * inicial y el respaldo si la base no responde.
+ */
+export async function getInstagramToken(): Promise<string | undefined> {
+  try {
+    const { connectDB } = await import('./mongodb')
+    const { AppSetting, INSTAGRAM_TOKEN_KEY } = await import('./models/AppSetting')
+    await connectDB()
+    const stored = await AppSetting.findOne({ key: INSTAGRAM_TOKEN_KEY })
+    if (stored?.value) return stored.value as string
+  } catch (err) {
+    console.error('No se pudo leer el token de Instagram guardado:', err)
+  }
+  return INSTAGRAM_TOKEN
+}
+
+async function getMetaConfig(channel: 'messenger' | 'instagram') {
   if (channel === 'instagram') {
+    const token = await getInstagramToken()
+    // Los tokens de "Instagram API con login de Instagram" empiezan por IGAA y solo
+    // funcionan contra graph.instagram.com; los de login con Facebook (EAA...) van a
+    // graph.facebook.com. La ruta es la misma: /<IG_ID>/messages
+    const host = token?.startsWith('IGAA') ? 'graph.instagram.com' : 'graph.facebook.com'
     return {
-      token: INSTAGRAM_TOKEN,
-      url: `https://graph.facebook.com/v25.0/${INSTAGRAM_BUSINESS_ID}/messages`,
+      token,
+      url: `https://${host}/v25.0/${INSTAGRAM_BUSINESS_ID}/messages`,
     }
   }
   return {
@@ -292,8 +315,72 @@ function getMetaConfig(channel: 'messenger' | 'instagram') {
   }
 }
 
+/**
+ * A quién se le envía en cada canal.
+ * WhatsApp: el teléfono, o el BSUID si el usuario ocultó su número.
+ * Messenger/Instagram: el IGSID/PSID, que vive dentro del waId con el prefijo del canal.
+ * El campo phone NO se usa aquí: en esos canales no hay teléfono real.
+ */
+export function channelRecipientId(room: { channel: string; phone?: string; waId: string }): string {
+  if (room.channel === 'whatsapp') return room.phone || room.waId
+  const [, ...rest] = room.waId.split(':')
+  return rest.length > 0 ? rest.join(':') : room.waId
+}
+
+export interface MetaUserProfile {
+  name?: string
+  username?: string
+  profilePic?: string
+}
+
+/**
+ * El webhook de Instagram/Messenger solo trae el ID del remitente (IGSID / PSID),
+ * nunca su nombre. Hay que pedirlo aparte con el token del canal.
+ * Solo funciona con usuarios que ya escribieron al negocio.
+ */
+export async function getMetaUserProfile(
+  channel: 'messenger' | 'instagram',
+  senderId: string
+): Promise<MetaUserProfile | null> {
+  try {
+    if (channel === 'instagram') {
+      const token = await getInstagramToken()
+      if (!token) return null
+      const host = token.startsWith('IGAA') ? 'graph.instagram.com' : 'graph.facebook.com'
+      // username no existe en todas las variantes del nodo: si Meta lo rechaza,
+      // se reintenta pidiendo solo lo que siempre está disponible.
+      for (const fields of ['name,username,profile_pic', 'name,profile_pic']) {
+        const res = await fetch(`https://${host}/v25.0/${senderId}?fields=${fields}&access_token=${token}`)
+        const data = await res.json()
+        if (res.ok) {
+          return { name: data.name, username: data.username, profilePic: data.profile_pic }
+        }
+        console.error('[Instagram] Error leyendo el perfil:', JSON.stringify(data))
+      }
+      return null
+    }
+
+    if (!META_PAGE_TOKEN) return null
+    const res = await fetch(
+      `https://graph.facebook.com/v25.0/${senderId}?fields=first_name,last_name,profile_pic&access_token=${META_PAGE_TOKEN}`
+    )
+    const data = await res.json()
+    if (!res.ok) {
+      console.error('[Messenger] Error leyendo el perfil:', JSON.stringify(data))
+      return null
+    }
+    return {
+      name: [data.first_name, data.last_name].filter(Boolean).join(' ') || undefined,
+      profilePic: data.profile_pic,
+    }
+  } catch (err) {
+    console.error(`Error consultando el perfil de ${channel}:`, err)
+    return null
+  }
+}
+
 async function sendMetaMessage(channel: 'messenger' | 'instagram', recipientId: string, text: string): Promise<string | null> {
-  const { token, url } = getMetaConfig(channel)
+  const { token, url } = await getMetaConfig(channel)
   if (!token) { console.error(`Token not set for channel ${channel}`); return null }
   const res = await fetch(`${url}?access_token=${token}`, {
     method: 'POST',
@@ -306,7 +393,7 @@ async function sendMetaMessage(channel: 'messenger' | 'instagram', recipientId: 
 }
 
 async function sendMetaImage(channel: 'messenger' | 'instagram', recipientId: string, imageUrl: string, caption?: string): Promise<string | null> {
-  const { token, url } = getMetaConfig(channel)
+  const { token, url } = await getMetaConfig(channel)
   if (!token) return null
   const res = await fetch(`${url}?access_token=${token}`, {
     method: 'POST',

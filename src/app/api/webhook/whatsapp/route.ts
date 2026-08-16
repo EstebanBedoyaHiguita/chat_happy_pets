@@ -5,7 +5,7 @@ import { Room } from '@/lib/models/Room'
 import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppAudioBuffer, type AdReferral } from '@/lib/whatsapp'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
@@ -124,7 +124,9 @@ async function processMessage(parsed: {
       waId: roomKey,
       channel: parsed.channel,
       name: parsed.name,
-      phone: parsed.phone ?? (parsed.channel === 'whatsapp' ? '' : parsed.from),
+      // phone SOLO guarda teléfonos reales. En Instagram/Messenger no hay, y el IGSID/PSID
+      // no puede ocupar su lugar: el pedido necesita un celular de verdad para la entrega.
+      phone: parsed.phone ?? '',
       waUserId: parsed.userId,
       username: parsed.username,
       status: 'bot',
@@ -155,9 +157,21 @@ async function processMessage(parsed: {
     await room.save()
   }
 
-  // Destino de las respuestas: teléfono si lo conocemos, si no el BSUID guardado en waId.
+  // Instagram y Messenger no mandan el nombre en el webhook, solo el ID del remitente.
+  // Se consulta a la API de perfil antes de responder para que el saludo lo incluya.
+  if (parsed.channel !== 'whatsapp' && (!room.name || room.name === 'Desconocido')) {
+    const profile = await getMetaUserProfile(parsed.channel, parsed.from)
+    const profileName = profile?.name || profile?.username
+    if (profileName) {
+      room.name = profileName
+      if (profile?.username) room.username = profile.username
+      await room.save()
+      await Customer.updateOne({ waId: room.waId }, { $set: { name: profileName } })
+    }
+  }
+
   // Clave de la sala: la del documento (puede diferir de roomKey si la sala se encontró por BSUID).
-  const replyTo = parsed.channel === 'whatsapp' ? (room.phone || room.waId) : parsed.from
+  const replyTo = channelRecipientId(room)
   const roomWaId = room.waId
 
   // mediaUrl = URL stored in DB for display in chat (proxy endpoint)
@@ -294,6 +308,7 @@ async function processMessage(parsed: {
   const roomData: RoomKnownData = {
     name: room.name,
     phone: room.phone || undefined,
+    channel: room.channel,
     petName: room.petName || undefined,
     petType: room.petType || undefined,
     petAge: room.petAge || undefined,

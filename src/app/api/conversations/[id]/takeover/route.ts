@@ -6,7 +6,7 @@ import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
 import { cookies } from 'next/headers'
 import { runAgent, RoomKnownData } from '@/lib/openai-agent'
-import { sendChannelMessage, sendChannelImage, extractImageUrls } from '@/lib/whatsapp'
+import { sendChannelMessage, sendChannelImage, extractImageUrls, channelRecipientId } from '@/lib/whatsapp'
 import { DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { AgentProduct } from '@/lib/openai-agent'
 
@@ -86,6 +86,7 @@ async function resumeBot(roomId: string) {
   const roomData: RoomKnownData = {
     name: room.name,
     phone: room.phone || undefined,
+    channel: room.channel,
     petName: room.petName || undefined,
     petType: room.petType || undefined,
     petAge: room.petAge || undefined,
@@ -127,8 +128,7 @@ async function resumeBot(roomId: string) {
 
   const { cleanText } = extractImageUrls(agentResponse.text)
 
-  // En WhatsApp waId es el teléfono, o el BSUID si el usuario ocultó su número
-  const recipientId = room.channel === 'whatsapp' ? (room.phone || room.waId) : room.phone
+  const recipientId = channelRecipientId(room)
 
   if (agentResponse.products.length > 0) {
     for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {

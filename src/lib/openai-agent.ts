@@ -528,7 +528,15 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
             )
           }
         }
-        result = { success: true }
+        // Si intentó guardar un celular y no era válido, el agente debe enterarse
+        // en vez de dar el dato por bueno.
+        result = args.phone && !normalizeColombianPhone(args.phone as string)
+          ? {
+              success: true,
+              phoneSaved: false,
+              instruction: 'El celular NO se guardó porque no es un número válido (deben ser 10 dígitos y empezar por 3). Pídeselo de nuevo al cliente y vuelve a llamar esta función.',
+            }
+          : { success: true }
         break
       }
       default:
@@ -616,6 +624,7 @@ export interface AgentResponse {
 export interface RoomKnownData {
   name?: string
   phone?: string
+  channel?: string
   petName?: string
   petType?: string
   petAge?: string
@@ -702,7 +711,7 @@ SALUDO SEGÚN TIPO DE CLIENTE:
 - NUNCA uses "Desconocido" como nombre.
 
 ${knownPhone ? '' : `⚠️ REGLA CRÍTICA — CELULAR DE CONTACTO OBLIGATORIO:
-De este cliente NO tenemos su número de celular (no aparece en DATOS QUE YA CONOCES). Sin celular el domiciliario no puede entregar el pedido.
+De este cliente NO tenemos su número de celular (no aparece en DATOS QUE YA CONOCES). Sin celular el domiciliario no puede entregar el pedido.${roomData.channel && roomData.channel !== 'whatsapp' ? `\n- Esta conversación es por ${roomData.channel === 'instagram' ? 'Instagram' : 'Messenger'}, donde NUNCA tenemos el número: pedirlo es obligatorio en todos los pedidos de este canal.` : ''}
 - Cuando el cliente vaya a hacer un pedido, pídele el celular junto con los datos de entrega: "Para coordinar la entrega, ¿me regalas tu número de celular? 📱"
 - En cuanto te lo dé, llama update_customer_info con phone y pásalo también en phone al llamar create_order.
 - Deben ser 10 dígitos y empezar por 3. Si te dan algo distinto, pídelo de nuevo amablemente.
