@@ -1,6 +1,11 @@
 const BASE_URL = process.env.HAPPY_PETS_API_URL
 
 async function fetchHP(path: string, options?: RequestInit) {
+  // Sin la variable, la URL quedaba como "undefined/api/products" y el error que
+  // llegaba arriba no decía nada. Es el fallo más común al desplegar.
+  if (!BASE_URL) {
+    throw new Error('HAPPY_PETS_API_URL no está configurada en este entorno')
+  }
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },

@@ -419,8 +419,11 @@ async function processMessage(parsed: {
 
   if (agentResponse.transfer) {
     room.status = 'human'
-    const isPaymentReceipt = agentResponse.transferReason?.toLowerCase().includes('comprobante')
-    if (!isPaymentReceipt) {
+    // Motivos en los que el propio mensaje del agente ya le avisó al cliente que
+    // lo pasa con un asesor: repetirlo aquí manda dos veces lo mismo.
+    const reason = agentResponse.transferReason?.toLowerCase() ?? ''
+    const yaAvisoElAgente = reason.includes('comprobante') || reason.includes('pedido pendiente')
+    if (!yaAvisoElAgente) {
       await sendChannelMessage(parsed.channel, replyTo, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
     }
   }

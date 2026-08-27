@@ -76,6 +76,8 @@ export default function OrdersPage() {
   const [manualItems, setManualItems] = useState<ManualItem[]>([{ name: '', quantity: 1, price: 0 }])
   const [saving, setSaving] = useState(false)
   const [catalog, setCatalog] = useState<CatalogProduct[]>([])
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [loadingCatalog, setLoadingCatalog] = useState(false)
 
   async function fetchOrders() {
     const res = await fetch('/api/bot-orders')
@@ -99,15 +101,31 @@ export default function OrdersPage() {
     setManualItems(prev => prev.filter((_, idx) => idx !== i))
   }
 
+  async function loadCatalog() {
+    setLoadingCatalog(true)
+    setCatalogError(null)
+    try {
+      const res = await fetch('/api/products')
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        // Antes el fallo era mudo: el selector quedaba vacio y no se podian crear
+        // pedidos manuales sin saber por que.
+        throw new Error(data?.detail || data?.error || `Error ${res.status}`)
+      }
+      const list = Array.isArray(data) ? data : []
+      setCatalog(list)
+      if (list.length === 0) setCatalogError('El catalogo llego vacio')
+    } catch (err) {
+      setCatalog([])
+      setCatalogError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingCatalog(false)
+    }
+  }
+
   async function openModal() {
     setShowModal(true)
-    if (catalog.length === 0) {
-      const res = await fetch('/api/products')
-      if (res.ok) {
-        const data = await res.json()
-        setCatalog(Array.isArray(data) ? data : [])
-      }
-    }
+    if (catalog.length === 0) await loadCatalog()
   }
 
   function selectProduct(i: number, productId: string) {
@@ -348,6 +366,16 @@ export default function OrdersPage() {
                 {/* Items */}
                 <div>
                   <label className="text-gray-400 text-xs mb-2 block">Productos *</label>
+                  {loadingCatalog && (
+                    <p className="text-gray-400 text-xs mb-2">Cargando catalogo...</p>
+                  )}
+                  {catalogError && (
+                    <div className="mb-2 rounded-lg border border-red-800 bg-red-950/40 px-3 py-2 text-xs text-red-300">
+                      No se pudo cargar el catalogo: {catalogError}
+                      <button type="button" onClick={loadCatalog}
+                        className="ml-2 underline hover:text-red-200">Reintentar</button>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     {manualItems.map((item, i) => (
                       <div key={i} className="flex gap-2 items-center">
