@@ -75,7 +75,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'create_order',
-      description: 'OBLIGATORIO: Registra un pedido NUEVO en el sistema. DEBES llamar esta función cuando el cliente confirme el pedido. NUNCA escribas el resumen del pedido sin haber llamado esta función primero. Para cada producto en items, DEBES pasar el productId (_id del producto que obtuviste de get_products) — esto garantiza el precio correcto. Esta función retorna orderNumber, subtotal, shipping y total reales — usa SOLO esos valores en tu respuesta.\n\n⚠️ Si el cliente quiere MODIFICAR un pedido que ya hizo, NO uses esta función: usa update_order. Esta función rechaza el pedido si el cliente ya tiene uno pendiente sin pagar.',
+      description: 'OBLIGATORIO: Registra un pedido NUEVO en el sistema. DEBES llamar esta función cuando el cliente confirme el pedido. NUNCA escribas el resumen del pedido sin haber llamado esta función primero. Para cada producto en items, DEBES pasar el productId (_id del producto que obtuviste de get_products) — esto garantiza el precio correcto. Esta función retorna orderNumber, subtotal, shipping y total reales — usa SOLO esos valores en tu respuesta.\n\n⚠️ Si el cliente quiere MODIFICAR un pedido que ya hizo, NO uses esta función: usa update_order. Esta función rechaza el pedido si el cliente ya tiene otro pendiente de entrega: en ese caso no se crea uno nuevo, se le informa al cliente y se le ofrece modificar el existente.',
       parameters: {
         type: 'object',
         properties: {
@@ -98,7 +98,6 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           address: { type: 'string', description: 'Dirección exacta de entrega' },
           phone: { type: 'string', description: 'Celular de contacto del cliente (10 dígitos, empieza por 3). OBLIGATORIO si en DATOS QUE YA CONOCES no aparece "Celular del cliente": en ese caso pídeselo al cliente antes de llamar esta función. Si ya aparece, no lo pidas de nuevo ni lo envíes.' },
           notes: { type: 'string', description: 'Notas adicionales del pedido (opcional)' },
-          confirmNewOrder: { type: 'boolean', description: 'Ponlo en true SOLO si el cliente ya tiene un pedido pendiente y confirmó explícitamente que quiere uno NUEVO y aparte, en vez de modificar el existente.' },
         },
         required: ['items', 'cityId', 'cityName', 'department', 'address'],
       },
@@ -220,15 +219,16 @@ interface EditableOrder {
 }
 
 /**
- * Único lugar que define qué pedido puede tocar el agente: pendiente y sin pagar.
- * Un pedido pagado, entregado o cancelado se transfiere a un asesor humano.
+ * Cualquier pedido del cliente que siga pendiente de entrega, pagado o no.
+ * Mientras exista uno, el agente no crea otro: se lo informa al cliente y le
+ * ofrece modificar ese (si aún no está pagado) o lo pasa a un asesor.
  */
-async function findEditableOrder(waId?: string): Promise<EditableOrder | null> {
+async function findPendingOrder(waId?: string): Promise<EditableOrder | null> {
   if (!waId) return null
   const { BotOrder } = await import('./models/BotOrder')
   const { connectDB } = await import('./mongodb')
   await connectDB()
-  return BotOrder.findOne({ waId, status: 'pending', paid: false }).sort({ createdAt: -1 }).lean()
+  return BotOrder.findOne({ waId, status: 'pending' }).sort({ createdAt: -1 }).lean()
 }
 
 async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}, pendingSteps: string[] = []): Promise<string> {
@@ -281,15 +281,25 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           })
         }
 
-        // Hard block: pedido duplicado. La regla equivalente ya existe en el prompt y aun así
-        // el agente creaba un segundo pedido cuando el cliente pedía modificar el anterior.
-        if (!args.confirmNewOrder) {
-          const existing = await findEditableOrder(waId)
+        // Hard block: mientras haya un pedido pendiente de entrega no se crea otro.
+        // La regla equivalente ya existe en el prompt y aun así el agente creaba un
+        // segundo pedido. Lo importante es que el cliente SIEMPRE reciba una
+        // explicación: antes el agente se quedaba sin saber qué decir.
+        {
+          const existing = await findPendingOrder(waId)
           if (existing) {
+            const detalle = existing.items
+              .map((i: PricedItem) => `- ${i.quantity} x ${i.name}: $${i.lineTotal.toLocaleString('es-CO')} COP`)
+              .join('\n')
+            const resumen = `📦 Pedido #${existing.orderNumber}\n${detalle}\nTotal: $${existing.total.toLocaleString('es-CO')} COP`
+
             return JSON.stringify({
               status: 'error',
-              instruction: `Este cliente YA tiene un pedido pendiente sin pagar: #${existing.orderNumber} (${existing.items.map((i: PricedItem) => `${i.quantity}x ${i.name}`).join(', ')} — total $${existing.total} COP).\n\nNO crees un pedido nuevo. Pregúntale al cliente:\n"Veo que ya tienes un pedido pendiente #${existing.orderNumber}:\n${existing.items.map((i: PricedItem) => `- ${i.quantity} x ${i.name}: $${i.lineTotal} COP`).join('\n')}\nTotal: $${existing.total} COP\n¿Quieres modificar ESE pedido o prefieres hacer uno nuevo aparte? 😊"\n\nEspera su respuesta:\n- Si quiere MODIFICARLO → llama update_order con orderNumber="${existing.orderNumber}".\n- Si confirma que quiere uno NUEVO y aparte → vuelve a llamar create_order con confirmNewOrder=true.`,
               existingOrderNumber: existing.orderNumber,
+              paid: existing.paid,
+              instruction: existing.paid
+                ? `El cliente YA tiene un pedido pendiente de entrega y además YA ESTÁ PAGADO: #${existing.orderNumber}.\n\nNO crees un pedido nuevo y NO uses ninguna otra herramienta. Respóndele AHORA con este mensaje (adaptando el tono, sin markdown):\n\n"¡Hola! 😊 Veo que ya tienes un pedido pendiente por entregar:\n\n${resumen}\n\nMientras ese pedido esté en camino no puedo crearte uno nuevo. Te paso con un asesor del equipo para que revise contigo qué necesitas 🐾"\n\nY agrega en la ÚLTIMA línea: {"transfer":true,"reason":"cliente pide otro pedido teniendo uno pendiente ya pagado"}`
+                : `El cliente YA tiene un pedido pendiente de entrega: #${existing.orderNumber}.\n\nNO crees un pedido nuevo. Respóndele AHORA con este mensaje (adaptando el tono, sin markdown), NUNCA te quedes sin responder:\n\n"¡Hola! 😊 Antes de seguir te cuento: ya tienes un pedido pendiente por entregar 🐾\n\n${resumen}\n\nMientras ese pedido esté pendiente no puedo crearte uno nuevo, pero sí puedo modificarlo si quieres agregar o cambiar algo. ¿Te gustaría? 😊"\n\nEspera su respuesta:\n- Si quiere AGREGAR o CAMBIAR productos → llama update_order con orderNumber="${existing.orderNumber}" y la lista COMPLETA y final de productos (los que ya tenía más los nuevos).\n- Si insiste en un pedido NUEVO y aparte → NO lo crees: dile "Claro que sí 😊 Te paso con un asesor del equipo para que te ayude con ese pedido aparte 🐾" y agrega en la ÚLTIMA línea: {"transfer":true,"reason":"cliente quiere un pedido nuevo teniendo uno pendiente"}`,
             })
           }
         }

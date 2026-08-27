@@ -354,6 +354,9 @@ async function processMessage(parsed: {
   )
 
   const { cleanText } = extractImageUrls(agentResponse.text)
+  // Si el agente se queda sin texto (herramienta fallida, respuesta vacia) el
+  // cliente NO puede quedarse sin respuesta: siempre sale algo.
+  const safeText = cleanText?.trim() || 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
   let waMessageId: string | null = null
 
   if (agentResponse.products.length > 0) {
@@ -375,12 +378,12 @@ async function processMessage(parsed: {
       })
     }
   } else {
-    waMessageId = await sendChannelMessage(parsed.channel, replyTo, cleanText)
+    waMessageId = await sendChannelMessage(parsed.channel, replyTo, safeText)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
       sender: 'bot',
-      content: cleanText,
+      content: safeText,
       waMessageId: waMessageId ?? undefined,
       timestamp: new Date(),
     })

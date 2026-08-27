@@ -132,6 +132,7 @@ async function resumeBot(roomId: string) {
   )
 
   const { cleanText } = extractImageUrls(agentResponse.text)
+  const safeText = cleanText?.trim() || 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
 
   const recipientId = channelRecipientId(room)
 
@@ -155,12 +156,12 @@ async function resumeBot(roomId: string) {
       })
     }
   } else {
-    const waMessageId = await sendChannelMessage(room.channel, recipientId, cleanText)
+    const waMessageId = await sendChannelMessage(room.channel, recipientId, safeText)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
       sender: 'bot',
-      content: cleanText,
+      content: safeText,
       waMessageId: waMessageId ?? undefined,
       timestamp: new Date(),
     })
