@@ -10,6 +10,11 @@ import { sendChannelMessage, sendChannelImage, extractImageUrls, channelRecipien
 import { DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { AgentProduct } from '@/lib/openai-agent'
 
+// El turno que crea un pedido encadena varias llamadas a OpenAI y al backend
+// (catalogo, ciudades, costo de envio). Con el default de Vercel la funcion se
+// quedaba sin tiempo y el cliente no recibia respuesta.
+export const maxDuration = 60
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -11,6 +11,11 @@ import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
 import type { Document } from 'mongoose'
 
+// El turno que crea un pedido encadena varias llamadas a OpenAI y al backend
+// (catalogo, ciudades, costo de envio). Con el default de Vercel la funcion se
+// quedaba sin tiempo y el cliente no recibia respuesta.
+export const maxDuration = 60
+
 async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
   const update: Record<string, string> = {}
 

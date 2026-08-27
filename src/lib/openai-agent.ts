@@ -1096,7 +1096,18 @@ Si NO hay que transferir, no incluyas ese JSON.`
   // create_order. El cliente recibe una confirmación de un pedido que no existe:
   // no está en /orders, no llega al Sheet y nadie lo despacha.
   const ORDER_ANNOUNCE = /pedido\s+(registrado|actualizado)|#\s*WA-\d+/i
-  const touchedOrder = orderCreated || calledTools.has('update_order') || calledTools.has('lookup_order')
+  // Afirmación explícita de que el pedido quedó registrado (más estricta: citar un
+  // #WA- no basta, eso también lo hacen lookup_order y el bloqueo de duplicado).
+  const ORDER_CONFIRM = /pedido\s+(registrado|actualizado)/i
+  // Basta con que HAYA llamado una herramienta de pedidos: si create_order fue
+  // bloqueada (duplicado, falta un dato), el agente ya está en el flujo real y su
+  // respuesta cita el pedido existente. Reintentar ahí duplicaba el trabajo del
+  // turno más pesado y la función de Vercel se quedaba sin tiempo: el cliente no
+  // recibía nada. El guard es solo para cuando no llamó NINGUNA herramienta.
+  const touchedOrder =
+    calledTools.has('create_order') ||
+    calledTools.has('update_order') ||
+    calledTools.has('lookup_order')
 
   if (ORDER_ANNOUNCE.test(fullText) && !touchedOrder) {
     console.error('[AGENT] PEDIDO FANTASMA: el bot anunció un pedido sin llamar ninguna herramienta. Forzando create_order.')
@@ -1121,7 +1132,11 @@ Si NO hay que transferir, no incluyas ese JSON.`
     fullText = response.choices[0].message.content ?? ''
 
     // Segundo intento fallido: no le mandamos al cliente una confirmación falsa.
-    if (ORDER_ANNOUNCE.test(fullText) && !orderCreated) {
+    // Solo degradamos si sigue AFIRMANDO que el pedido quedó registrado sin que
+    // ninguna herramienta lo confirme. Si create_order fue bloqueada (duplicado,
+    // dato faltante), su respuesta pidiendo el dato o citando el pedido existente
+    // es la correcta y se envía tal cual.
+    if (ORDER_CONFIRM.test(fullText) && !orderCreated && !realOrderNumber) {
       console.error('[AGENT] PEDIDO FANTASMA: el reintento tampoco creó el pedido. Se transfiere a un asesor.')
       fullText =
         'Déjame confirmarte el pedido con un asesor del equipo para no equivocarme con los datos 😊 ' +
