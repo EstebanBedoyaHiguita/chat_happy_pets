@@ -1,3 +1,5 @@
+import { waitUntil } from '@vercel/functions'
+
 interface SheetItem {
   name: string
   quantity: number
@@ -76,7 +78,7 @@ export function sendToSheet(payload: ReturnType<typeof buildSheetPayload>) {
     return
   }
   console.log(`[Sheets webhook] ${payload.action} →`, JSON.stringify(payload))
-  fetch(webhookUrl, {
+  const sent = fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify(payload),
@@ -92,4 +94,15 @@ export function sendToSheet(payload: ReturnType<typeof buildSheetPayload>) {
     .catch((err: unknown) => {
       console.error('[Sheets webhook error]', err instanceof Error ? err.message : String(err))
     })
+
+  // En Vercel, la función serverless se congela en cuanto responde: un fetch sin
+  // await se queda a medias y el pedido nunca aparece en la hoja. waitUntil
+  // mantiene viva la instancia hasta que termine.
+  try {
+    waitUntil(sent)
+  } catch {
+    // Fuera del contexto de una request (scripts, tests) waitUntil no aplica.
+  }
+
+  return sent
 }

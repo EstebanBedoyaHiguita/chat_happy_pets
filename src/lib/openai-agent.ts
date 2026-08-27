@@ -547,6 +547,17 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
     return json
   } catch (error) {
     console.error('[Tool ERROR]', name, error instanceof Error ? error.message : error)
+    // En catálogo se puede seguir con la información del sistema, pero si falló el
+    // registro del pedido NO puede darse por hecho: sin esto el agente respondía
+    // igual y el cliente recibía la confirmación de un pedido inexistente.
+    if (name === 'create_order' || name === 'update_order') {
+      return JSON.stringify({
+        status: 'error',
+        instruction:
+          'El pedido NO se pudo registrar. NO le confirmes el pedido al cliente, NO inventes un número de pedido y NO escribas ningún resumen. ' +
+          'Dile: "Dame un momento, voy a confirmar tu pedido con un asesor para no equivocarme 😊" y transfiere agregando en la ÚLTIMA línea: {"transfer":true,"reason":"fallo al registrar el pedido"}',
+      })
+    }
     return JSON.stringify({ status: 'sin_datos', instruccion: 'Usa la informacion del sistema para responder. No menciones errores tecnicos.' })
   }
 }
@@ -991,8 +1002,13 @@ Si NO hay que transferir, no incluyas ese JSON.`
   const collectedProducts: AgentProduct[] = []
   const HAPPY_PETS_BASE = process.env.HAPPY_PETS_API_URL ?? ''
   let orderCreated = false
+  // Número real devuelto por la herramienta. Cualquier #WA-... del texto que no sea
+  // este está inventado por el modelo.
+  let realOrderNumber: string | null = null
+  const calledTools = new Set<string>()
 
   // Handle tool calls
+  const runToolLoop = async () => {
   while (response.choices[0].finish_reason === 'tool_calls') {
     const assistantMessage = response.choices[0].message
     messages.push(assistantMessage)
@@ -1002,12 +1018,16 @@ Si NO hay que transferir, no incluyas ese JSON.`
     for (const toolCall of toolCalls) {
       const args = JSON.parse(toolCall.function.arguments || '{}')
       const result = await executeTool(toolCall.function.name, args, waId, collectedProducts, roomData, pendingSteps ?? [])
+      calledTools.add(toolCall.function.name)
 
       // Detect successful order creation
-      if (toolCall.function.name === 'create_order') {
+      if (toolCall.function.name === 'create_order' || toolCall.function.name === 'update_order') {
         try {
           const parsed = JSON.parse(result)
-          if (parsed.success === true) orderCreated = true
+          if (parsed.success === true) {
+            if (toolCall.function.name === 'create_order') orderCreated = true
+            if (parsed.orderNumber) realOrderNumber = String(parsed.orderNumber)
+          }
         } catch { /* ignore */ }
       }
 
@@ -1051,8 +1071,12 @@ Si NO hay que transferir, no incluyas ese JSON.`
       tool_choice: 'auto',
     })
   }
+  }
+
+  await runToolLoop()
 
   let fullText = response.choices[0].message.content ?? ''
+  let forceTransfer = false
 
   // Si el bot escribió el template literal sin llamar create_order, borra esa parte
   // para evitar mostrar [orderNumber] al cliente
@@ -1064,6 +1088,51 @@ Si NO hay que transferir, no incluyas ese JSON.`
     if (!fullText) {
       fullText = 'Hubo un problema al registrar el pedido. Por favor intenta de nuevo confirmando los productos, ciudad y dirección.'
     }
+  }
+
+  // ─── Guard anti-pedido-fantasma ────────────────────────────────────────────
+  // El modelo copia del historial el formato de un pedido anterior (incluido un
+  // #WA-... plausible, normalmente el último +1) y lo escribe sin llamar a
+  // create_order. El cliente recibe una confirmación de un pedido que no existe:
+  // no está en /orders, no llega al Sheet y nadie lo despacha.
+  const ORDER_ANNOUNCE = /pedido\s+(registrado|actualizado)|#\s*WA-\d+/i
+  const touchedOrder = orderCreated || calledTools.has('update_order') || calledTools.has('lookup_order')
+
+  if (ORDER_ANNOUNCE.test(fullText) && !touchedOrder) {
+    console.error('[AGENT] PEDIDO FANTASMA: el bot anunció un pedido sin llamar ninguna herramienta. Forzando create_order.')
+    messages.push({ role: 'assistant', content: fullText })
+    messages.push({
+      role: 'system',
+      content:
+        'ALTO. Acabas de escribir una confirmación de pedido SIN llamar a create_order, así que ese pedido NO EXISTE: no le llega al equipo y nadie lo despacha. El número que escribiste te lo inventaste. ' +
+        'Llama AHORA a create_order con los productos, cantidades, dirección y ciudad de esta conversación. ' +
+        'Si te falta algún dato obligatorio, NO inventes el pedido: pregúntaselo al cliente. ' +
+        'Después de que la herramienta responda, escribe el resumen usando EXACTAMENTE el orderNumber y los totales que ella devuelva.',
+    })
+
+    response = await getOpenAI().chat.completions.create({
+      model,
+      temperature,
+      messages,
+      tools,
+      tool_choice: { type: 'function', function: { name: 'create_order' } },
+    })
+    await runToolLoop()
+    fullText = response.choices[0].message.content ?? ''
+
+    // Segundo intento fallido: no le mandamos al cliente una confirmación falsa.
+    if (ORDER_ANNOUNCE.test(fullText) && !orderCreated) {
+      console.error('[AGENT] PEDIDO FANTASMA: el reintento tampoco creó el pedido. Se transfiere a un asesor.')
+      fullText =
+        'Déjame confirmarte el pedido con un asesor del equipo para no equivocarme con los datos 😊 ' +
+        'En un momento te escriben para cerrarlo 🐾'
+      forceTransfer = true
+    }
+  }
+
+  // Si citó un número distinto al que devolvió la herramienta, se corrige.
+  if (realOrderNumber) {
+    fullText = fullText.replace(/WA-\d+/g, realOrderNumber)
   }
 
   // Only send product cards for products whose image URL the agent explicitly included
@@ -1098,6 +1167,11 @@ Si NO hay que transferir, no incluyas ese JSON.`
     }
   } catch {
     // No transfer JSON found, that's fine
+  }
+
+  if (forceTransfer) {
+    transfer = true
+    transferReason = 'el bot anunció un pedido que no se pudo registrar'
   }
 
   return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: mentionedProducts, orderCreated }
