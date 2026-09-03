@@ -1012,6 +1012,10 @@ Si NO hay que transferir, no incluyas ese JSON.`
   const collectedProducts: AgentProduct[] = []
   const HAPPY_PETS_BASE = process.env.HAPPY_PETS_API_URL ?? ''
   let orderCreated = false
+  // create_order se llamó pero la herramienta la rechazó (falta un dato, ya hay un
+  // pedido pendiente…). Ahí la respuesta del modelo — pedir el dato o mostrar el
+  // pedido existente con sus totales — es la correcta y no se debe degradar.
+  let orderBlocked = false
   // Número real devuelto por la herramienta. Cualquier #WA-... del texto que no sea
   // este está inventado por el modelo.
   let realOrderNumber: string | null = null
@@ -1037,6 +1041,8 @@ Si NO hay que transferir, no incluyas ese JSON.`
           if (parsed.success === true) {
             if (toolCall.function.name === 'create_order') orderCreated = true
             if (parsed.orderNumber) realOrderNumber = String(parsed.orderNumber)
+          } else if (toolCall.function.name === 'create_order') {
+            orderBlocked = true
           }
         } catch { /* ignore */ }
       }
@@ -1109,6 +1115,16 @@ Si NO hay que transferir, no incluyas ese JSON.`
   // Afirmación explícita de que el pedido quedó registrado (más estricta: citar un
   // #WA- no basta, eso también lo hacen lookup_order y el bloqueo de duplicado).
   const ORDER_CONFIRM = /pedido\s+(registrado|actualizado)/i
+  // El modelo también se salta la línea "✅ Pedido registrado #..." y arranca directo
+  // en el resumen de ítems: para el cliente es la misma confirmación (precios, datos
+  // de pago, fecha de entrega) pero no contiene ninguna de las frases de arriba.
+  // Se detecta el bloque post-pedido, que según el prompt solo existe DESPUÉS de
+  // create_order: totales + datos de pago/entrega. Se exigen los dos para no disparar
+  // cuando el cliente solo pregunta "¿cuánto me sale?" o pide los datos bancarios.
+  const looksLikeOrderSummary = (text: string) =>
+    /subtotal:\s*\$/i.test(text) &&
+    /(^|\n)\s*total:\s*\$/i.test(text) &&
+    /cuenta de ahorros|datos para transferencia|tu pedido llegar/i.test(text)
   // Basta con que HAYA llamado una herramienta de pedidos: si create_order fue
   // bloqueada (duplicado, falta un dato), el agente ya está en el flujo real y su
   // respuesta cita el pedido existente. Reintentar ahí duplicaba el trabajo del
@@ -1119,7 +1135,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
     calledTools.has('update_order') ||
     calledTools.has('lookup_order')
 
-  if (ORDER_ANNOUNCE.test(fullText) && !touchedOrder) {
+  if ((ORDER_ANNOUNCE.test(fullText) || looksLikeOrderSummary(fullText)) && !touchedOrder) {
     console.error('[AGENT] PEDIDO FANTASMA: el bot anunció un pedido sin llamar ninguna herramienta. Forzando create_order.')
     messages.push({ role: 'assistant', content: fullText })
     messages.push({
@@ -1145,8 +1161,11 @@ Si NO hay que transferir, no incluyas ese JSON.`
     // Solo degradamos si sigue AFIRMANDO que el pedido quedó registrado sin que
     // ninguna herramienta lo confirme. Si create_order fue bloqueada (duplicado,
     // dato faltante), su respuesta pidiendo el dato o citando el pedido existente
-    // es la correcta y se envía tal cual.
-    if (ORDER_CONFIRM.test(fullText) && !orderCreated && !realOrderNumber) {
+    // es la correcta y se envía tal cual — por eso el resumen sin frase de
+    // confirmación solo degrada cuando la herramienta ni siquiera fue bloqueada.
+    const stillAnnouncing =
+      ORDER_CONFIRM.test(fullText) || (looksLikeOrderSummary(fullText) && !orderBlocked)
+    if (stillAnnouncing && !orderCreated && !realOrderNumber) {
       console.error('[AGENT] PEDIDO FANTASMA: el reintento tampoco creó el pedido. Se transfiere a un asesor.')
       fullText =
         'Déjame confirmarte el pedido con un asesor del equipo para no equivocarme con los datos 😊 ' +
