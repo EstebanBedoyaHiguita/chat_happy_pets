@@ -166,20 +166,6 @@ export function decideDisplay(
   })
 
   const bestBarfHit = Math.max(0, ...full.map((p) => flavorTokens(p.name).length))
-
-  // El cliente responde "Frutas" a "¿cuál te interesa?". No completa los dos tokens de
-  // "Pollo Frutas", pero ningún otro sabor lleva "fruta", así que identifica el producto
-  // sin ambigüedad. Hace falta para distinguir "está eligiendo" de "está preguntando por
-  // el catálogo": sin esto, elegir un sabor reabre la vitrina entera.
-  if (full.length === 0 && otherHit === 0) {
-    const unico = barf.filter((p) =>
-      flavorTokens(p.name).some(
-        (t) => said.has(t) && barf.filter((q) => flavorTokens(q.name).includes(t)).length === 1
-      )
-    )
-    if (unico.length > 0) return { mode: 'seleccion', selected: unico, ambiguous: false }
-  }
-
   if (full.length === 0 || otherHit >= bestBarfHit) {
     return { mode: 'descubrimiento', selected: [], ambiguous: false }
   }
@@ -238,9 +224,7 @@ const CARD_RULE =
 export function buildDisplayInstruction(
   decision: DisplayDecision,
   barf: CatalogProduct[],
-  petTypeKnown: boolean,
-  /** URLs de fotos que el cliente YA recibió en esta conversación. */
-  shown: Set<string> = new Set()
+  petTypeKnown: boolean
 ): string {
   if (barf.length === 0) return ''
 
@@ -248,33 +232,14 @@ export function buildDisplayInstruction(
   const rango = `${cop(Math.min(...prices))} a ${cop(Math.max(...prices))}`
 
   if (decision.mode === 'seleccion') {
-    // Le mostraste las opciones y el cliente eligió una de ellas: no tiene sentido
-    // reenviarle la misma foto. Solo van los sabores que todavía no ha visto.
-    const nuevos = decision.selected.filter((p) => !shown.has(p.imageUrl)).slice(0, 4)
-    const vistos = decision.selected.filter((p) => shown.has(p.imageUrl))
-
-    if (nuevos.length === 0) {
-      return (
-        `PRODUCTOS PARA ESTE TURNO:\n` +
-        `El cliente eligió ${vistos.map((p) => p.name).join(', ')}, que YA le mostraste con foto ` +
-        `en esta conversación.\n` +
-        `⛔ NO vuelvas a enviar esa foto ni escribas su URL: el cliente ya la tiene.\n` +
-        `⛔ NO vuelvas a listar los demás sabores: ya se los mencionaste.\n` +
-        `Responde en texto y avanza con el pedido.`
-      )
-    }
-
     const header = decision.ambiguous
       ? 'El cliente nombró un sabor de forma imprecisa y hay más de una opción posible. ' +
         'Muéstrale ESTAS y pregúntale cuál quiere. No elijas tú por él:'
-      : 'El cliente eligió estos sabores y todavía no ha visto su foto. Muéstrale SOLO estos:'
-    const yaVistos = vistos.length
-      ? `\n⛔ De ${vistos.map((p) => p.name).join(', ')} ya le enviaste la foto: NO la repitas.`
-      : ''
+      : 'El cliente eligió estos sabores. Muéstrale SOLO estos y pregúntale cuántos paquetes quiere de cada uno:'
     return (
       `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n${header}\n` +
-      nuevos.map(line).join('\n\n') +
-      `\n\n${CARD_RULE}No listes otros sabores en este mensaje.${yaVistos}`
+      decision.selected.slice(0, 4).map(line).join('\n\n') +
+      `\n\n${CARD_RULE}No listes otros sabores en este mensaje.`
     )
   }
 
@@ -286,10 +251,6 @@ export function buildDisplayInstruction(
     )
   }
 
-  // Pregunta de catálogo ("¿qué precio tiene la BARF?"): la vitrina SIEMPRE se muestra,
-  // aunque el cliente ya la haya visto antes. Aquí NO se aplica `shown`: hacerlo dejó al
-  // bot respondiendo precios sin una sola foto (2026-09-04). La memoria de lo ya enviado
-  // solo tiene sentido en el modo selección, para no repetir el sabor que acaba de pedir.
   const vitrina = showcase(barf)
   const resto = barf.filter((p) => !vitrina.includes(p))
   const restoTexto = resto.length
@@ -298,22 +259,11 @@ export function buildDisplayInstruction(
       resto.map((p) => `${p.name} — ${cop(p.price)}`).join('\n')
     : ''
 
-  // Si ya las envió, la vitrina sigue disponible (una pregunta de precios SIEMPRE debe
-  // poder responderse con fotos, aunque el cliente ya haya preguntado antes), pero se
-  // avisa para que no las reenvíe al responder cosas como "10" o "no".
-  const yaEnviadas = vitrina.every((p) => shown.has(p.imageUrl))
-  const aviso = yaEnviadas
-    ? `\n\n⚠️ Estas fotos YA se las enviaste en esta conversación. Reenvíalas SOLO si te está ` +
-      `pidiendo ver las opciones otra vez. Si está respondiendo a otra cosa (una cantidad, un ` +
-      `"sí", un "no"), NO escribas ninguna URL y sigue con el pedido.`
-    : ''
-
   return (
     `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n` +
     `El cliente está conociendo el catálogo. Estos ${vitrina.length} sabores van con foto:\n` +
     vitrina.map(line).join('\n\n') +
     `\n\n${CARD_RULE}` +
-    restoTexto +
-    aviso
+    restoTexto
   )
 }
