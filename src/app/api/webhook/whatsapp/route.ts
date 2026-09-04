@@ -5,7 +5,7 @@ import { Room } from '@/lib/models/Room'
 import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, splitAroundImages, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
@@ -356,33 +356,37 @@ async function processMessage(parsed: {
     pendingSteps.length > 0 ? pendingSteps : undefined
   )
 
-  const { cleanText } = extractImageUrls(agentResponse.text)
+  const products = (agentResponse.products as AgentProduct[]).slice(0, 4)
+  // El agente escribe un solo bloque con el saludo, los productos y la cola. Se corta
+  // por donde él puso las URLs: lo de antes sale primero, las fotos llevan la
+  // información una sola vez en su pie, y lo de después sale al final. Así el cliente
+  // nunca recibe un mensaje con los mismos datos que ya trae la foto.
+  const split = splitAroundImages(agentResponse.text, products.map((p) => p.imageUrl))
+  const intro = extractImageUrls(split.before).cleanText.trim()
+  const cola = extractImageUrls(split.after).cleanText.trim()
   // Si el agente se queda sin texto (herramienta fallida, respuesta vacia) el
   // cliente NO puede quedarse sin respuesta: siempre sale algo.
-  // El relleno solo aplica cuando NO hay nada más que mandar: si van fotos, el cliente
-  // ya recibe algo y un "dame un momentico" encima sobra.
-  const safeText =
-    cleanText?.trim() ||
-    (agentResponse.products.length > 0 ? '' : 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾')
+  const relleno = products.length === 0 && !intro && !cola
+    ? 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
+    : ''
   let waMessageId: string | null = null
 
-  // El texto va SIEMPRE, haya productos o no. Antes se enviaba solo en el else, así que
-  // cuando salían fotos se perdía la prosa del bot: la línea que introduce el producto,
-  // el "y también tenemos estos sabores" y el "¿cuántos paquetes quieres?". Además ese
-  // texto es el que después leen las detecciones de estado sobre los salientes.
-  if (safeText) {
-    waMessageId = await sendChannelMessage(parsed.channel, replyTo, safeText)
+  const sendText = async (text: string) => {
+    if (!text) return
+    waMessageId = await sendChannelMessage(parsed.channel, replyTo, text)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
       sender: 'bot',
-      content: safeText,
+      content: text,
       waMessageId: waMessageId ?? undefined,
       timestamp: new Date(),
     })
   }
 
-  for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
+  await sendText(intro || relleno)
+
+  for (const product of products) {
     const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
     const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
     if (product.imageUrl) {
@@ -399,6 +403,8 @@ async function processMessage(parsed: {
       timestamp: new Date(),
     })
   }
+
+  await sendText(cola)
 
   Message.countDocuments({ roomId: room._id }).then((count) => {
     if (count > 6) {

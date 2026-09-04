@@ -114,6 +114,33 @@ export async function getWhatsAppAudioBuffer(mediaId: string): Promise<{ buffer:
   return { buffer, mimeType }
 }
 
+/**
+ * Parte el texto del agente en lo que va ANTES de las fotos y lo que va DESPUÉS,
+ * usando la posición donde él mismo escribió las URLs.
+ *
+ * El agente escribe un solo bloque: saludo, los productos (cada uno con su URL) y al
+ * final los sabores que van solo en texto. Si eso se manda como un mensaje, el cliente
+ * recibe la información de los productos dos veces — una en el texto y otra en el pie
+ * de cada foto. Cortando por las URLs, el saludo sale antes, las fotos llevan la
+ * información una sola vez, y la cola ("y también tenemos…") sale después.
+ */
+export function splitAroundImages(
+  text: string,
+  imageUrls: string[]
+): { before: string; after: string } {
+  const positions = imageUrls
+    .map((url) => text.indexOf(url))
+    .filter((at) => at >= 0)
+
+  if (positions.length === 0) return { before: text, after: '' }
+
+  // Se corta SOLO en la primera URL. Todo lo que venga después se conserva junto (las
+  // URLs las quita extractImageUrls): así nada de lo que escribió el agente se pierde,
+  // ni siquiera lo que haya puesto entre dos fotos.
+  const first = Math.min(...positions)
+  return { before: text.slice(0, first), after: text.slice(first) }
+}
+
 export function extractImageUrls(text: string): { cleanText: string; imageUrls: string[] } {
   const imageUrls: string[] = []
 

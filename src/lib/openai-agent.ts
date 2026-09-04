@@ -1217,13 +1217,17 @@ Si NO hay que transferir, no incluyas ese JSON.`
   // for the initial BARF presentation, and only show image cards when the client
   // selects a specific product and the agent includes that product's image URL.
   // Dedupe: un mismo producto puede venir del catálogo sembrado y de get_products.
+  // Se ordenan por dónde aparece su URL en el texto: así las fotos salen en el orden en
+  // que el agente las presentó (el de la vitrina) y no en el del catálogo.
   const seenImages = new Set<string>()
-  const mentionedProducts = collectedProducts.filter(p => {
-    if (!p.imageUrl || !fullText.includes(p.imageUrl)) return false
-    if (seenImages.has(p.imageUrl)) return false
-    seenImages.add(p.imageUrl)
-    return true
-  })
+  const mentionedProducts = collectedProducts
+    .filter(p => {
+      if (!p.imageUrl || !fullText.includes(p.imageUrl)) return false
+      if (seenImages.has(p.imageUrl)) return false
+      seenImages.add(p.imageUrl)
+      return true
+    })
+    .sort((a, b) => fullText.indexOf(a.imageUrl) - fullText.indexOf(b.imageUrl))
 
   // Parse transfer signal from last line
   const lines = fullText.split('\n')

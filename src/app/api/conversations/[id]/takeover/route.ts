@@ -6,7 +6,7 @@ import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
 import { cookies } from 'next/headers'
 import { runAgent, RoomKnownData } from '@/lib/openai-agent'
-import { sendChannelMessage, sendChannelImage, extractImageUrls, channelRecipientId } from '@/lib/whatsapp'
+import { sendChannelMessage, sendChannelImage, extractImageUrls, splitAroundImages, channelRecipientId } from '@/lib/whatsapp'
 import { DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { AgentProduct } from '@/lib/openai-agent'
 
@@ -74,9 +74,11 @@ async function resumeBot(roomId: string) {
 
   const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
   const allTexts = history.map(m => m.content.toLowerCase())
+  // Mismo criterio que el webhook: exigir 'total' y 'cop' nunca disparaba, porque
+  // ningún formato de resumen los trae.
   const orderSummaryShown = outboundTexts.some(t =>
-    (t.includes('¿es correcto?') || t.includes('es correcto?')) &&
-    t.includes('total') && t.includes('cop')
+    (t.includes('es correcto?') || t.includes('todo correcto?')) &&
+    (t.includes('paquete') || t.includes('paquetes'))
   )
   const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
 
@@ -131,27 +133,33 @@ async function resumeBot(roomId: string) {
     pendingSteps.length > 0 ? pendingSteps : undefined
   )
 
-  const { cleanText } = extractImageUrls(agentResponse.text)
-  // Mismo criterio que el webhook: el texto va siempre, el relleno solo si no hay fotos.
-  const safeText =
-    cleanText?.trim() ||
-    (agentResponse.products.length > 0 ? '' : 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾')
-
   const recipientId = channelRecipientId(room)
+  const products = (agentResponse.products as AgentProduct[]).slice(0, 4)
+  // Mismo criterio que el webhook: se corta el texto por donde el agente puso las URLs
+  // para que la información del producto viaje una sola vez, en el pie de la foto.
+  const split = splitAroundImages(agentResponse.text, products.map((p) => p.imageUrl))
+  const intro = extractImageUrls(split.before).cleanText.trim()
+  const cola = extractImageUrls(split.after).cleanText.trim()
+  const relleno = products.length === 0 && !intro && !cola
+    ? 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
+    : ''
 
-  if (safeText) {
-    const waMessageId = await sendChannelMessage(room.channel, recipientId, safeText)
+  const sendText = async (text: string) => {
+    if (!text) return
+    const waMessageId = await sendChannelMessage(room.channel, recipientId, text)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
       sender: 'bot',
-      content: safeText,
+      content: text,
       waMessageId: waMessageId ?? undefined,
       timestamp: new Date(),
     })
   }
 
-  for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
+  await sendText(intro || relleno)
+
+  for (const product of products) {
     const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
     const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
     let waMessageId: string | null = null
@@ -169,6 +177,8 @@ async function resumeBot(roomId: string) {
       timestamp: new Date(),
     })
   }
+
+  await sendText(cola)
 
   room.lastMessage = agentResponse.text
   room.lastMessageAt = new Date()

@@ -207,6 +207,16 @@ const cop = (n: number) => `$${n.toLocaleString('es-CO')} COP`
 const line = (p: CatalogProduct) => `${p.name} — ${cop(p.price)}\n${p.imageUrl}`
 
 /**
+ * Cada producto sale como una tarjeta (foto + nombre + precio + descripción en el pie),
+ * que se envía ANTES del texto. Si el modelo además escribe esos datos, el cliente los
+ * lee dos veces — pasó en la prueba del 2026-09-04.
+ */
+const CARD_RULE =
+  'Escribe la URL de cada uno en su propia línea: eso hace que le llegue la foto. ' +
+  '⛔ NO escribas el nombre, el precio ni la descripción de esos productos: la foto ya los lleva ' +
+  'y repetirlos se los muestra dos veces al cliente. Tu texto es solo la frase que acompaña y la pregunta.\n'
+
+/**
  * Bloque `system` con los productos reales que el agente debe usar en ESTE turno.
  * Lleva precios e imágenes del catálogo, así que el modelo no tiene que llamar
  * get_products para tener datos correctos ni puede inventarse un precio.
@@ -229,8 +239,7 @@ export function buildDisplayInstruction(
     return (
       `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n${header}\n` +
       decision.selected.slice(0, 4).map(line).join('\n\n') +
-      '\n\nEscribe la URL de cada uno en tu respuesta: así es como le llega la foto al cliente. ' +
-      'No listes otros sabores en este mensaje.'
+      `\n\n${CARD_RULE}No listes otros sabores en este mensaje.`
     )
   }
 
@@ -245,16 +254,16 @@ export function buildDisplayInstruction(
   const vitrina = showcase(barf)
   const resto = barf.filter((p) => !vitrina.includes(p))
   const restoTexto = resto.length
-    ? '\n\nY en el MISMO mensaje, después de las imágenes, menciona estos otros SOLO en texto ' +
-      '(sin URL, sin foto) y pregúntale si quiere ver alguno:\n' +
+    ? '\nEn tu texto sí menciona estos otros sabores, SOLO por nombre y precio (sin URL, sin foto), ' +
+      'y pregúntale si quiere ver alguno:\n' +
       resto.map((p) => `${p.name} — ${cop(p.price)}`).join('\n')
     : ''
 
   return (
     `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n` +
-    `El cliente está conociendo el catálogo. Muéstrale ESTOS ${vitrina.length} sabores con su imagen ` +
-    `(escribe la URL de cada uno en tu respuesta: así es como le llega la foto):\n` +
+    `El cliente está conociendo el catálogo. Estos ${vitrina.length} sabores van con foto:\n` +
     vitrina.map(line).join('\n\n') +
+    `\n\n${CARD_RULE}` +
     restoTexto
   )
 }
