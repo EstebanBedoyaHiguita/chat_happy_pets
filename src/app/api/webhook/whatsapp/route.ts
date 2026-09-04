@@ -292,9 +292,12 @@ async function processMessage(parsed: {
 
   // Detect pending flow steps so the agent doesn't skip them
   const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
+  // El resumen se detecta por la pregunta de confirmación + las cantidades en paquetes.
+  // Antes se exigía además 'total' y 'cop', que ninguno de los dos formatos de resumen
+  // trae ("Tu pedido es: … ¿Todo correcto?"), así que el paso de snacks nunca disparaba.
   const orderSummaryShown = outboundTexts.some(t =>
-    (t.includes('¿es correcto?') || t.includes('es correcto?')) &&
-    t.includes('total') && t.includes('cop')
+    (t.includes('es correcto?') || t.includes('todo correcto?')) &&
+    (t.includes('paquete') || t.includes('paquetes'))
   )
   const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
 
@@ -356,34 +359,42 @@ async function processMessage(parsed: {
   const { cleanText } = extractImageUrls(agentResponse.text)
   // Si el agente se queda sin texto (herramienta fallida, respuesta vacia) el
   // cliente NO puede quedarse sin respuesta: siempre sale algo.
-  const safeText = cleanText?.trim() || 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
+  // El relleno solo aplica cuando NO hay nada más que mandar: si van fotos, el cliente
+  // ya recibe algo y un "dame un momentico" encima sobra.
+  const safeText =
+    cleanText?.trim() ||
+    (agentResponse.products.length > 0 ? '' : 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾')
   let waMessageId: string | null = null
 
-  if (agentResponse.products.length > 0) {
-    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
-      const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
-      const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
-      if (product.imageUrl) {
-        waMessageId = await sendChannelImage(parsed.channel, replyTo, product.imageUrl, caption)
-      } else {
-        waMessageId = await sendChannelMessage(parsed.channel, replyTo, caption)
-      }
-      await Message.create({
-        roomId: room._id,
-        direction: 'outbound',
-        sender: 'bot',
-        content,
-        waMessageId: waMessageId ?? undefined,
-        timestamp: new Date(),
-      })
-    }
-  } else {
+  // El texto va SIEMPRE, haya productos o no. Antes se enviaba solo en el else, así que
+  // cuando salían fotos se perdía la prosa del bot: la línea que introduce el producto,
+  // el "y también tenemos estos sabores" y el "¿cuántos paquetes quieres?". Además ese
+  // texto es el que después leen las detecciones de estado sobre los salientes.
+  if (safeText) {
     waMessageId = await sendChannelMessage(parsed.channel, replyTo, safeText)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
       sender: 'bot',
       content: safeText,
+      waMessageId: waMessageId ?? undefined,
+      timestamp: new Date(),
+    })
+  }
+
+  for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
+    const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
+    const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
+    if (product.imageUrl) {
+      waMessageId = await sendChannelImage(parsed.channel, replyTo, product.imageUrl, caption)
+    } else {
+      waMessageId = await sendChannelMessage(parsed.channel, replyTo, caption)
+    }
+    await Message.create({
+      roomId: room._id,
+      direction: 'outbound',
+      sender: 'bot',
+      content,
       waMessageId: waMessageId ?? undefined,
       timestamp: new Date(),
     })

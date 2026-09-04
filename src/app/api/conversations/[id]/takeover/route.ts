@@ -132,36 +132,39 @@ async function resumeBot(roomId: string) {
   )
 
   const { cleanText } = extractImageUrls(agentResponse.text)
-  const safeText = cleanText?.trim() || 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
+  // Mismo criterio que el webhook: el texto va siempre, el relleno solo si no hay fotos.
+  const safeText =
+    cleanText?.trim() ||
+    (agentResponse.products.length > 0 ? '' : 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾')
 
   const recipientId = channelRecipientId(room)
 
-  if (agentResponse.products.length > 0) {
-    for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
-      const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
-      const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
-      let waMessageId: string | null = null
-      if (product.imageUrl) {
-        waMessageId = await sendChannelImage(room.channel, recipientId, product.imageUrl, caption)
-      } else {
-        waMessageId = await sendChannelMessage(room.channel, recipientId, caption)
-      }
-      await Message.create({
-        roomId: room._id,
-        direction: 'outbound',
-        sender: 'bot',
-        content,
-        waMessageId: waMessageId ?? undefined,
-        timestamp: new Date(),
-      })
-    }
-  } else {
+  if (safeText) {
     const waMessageId = await sendChannelMessage(room.channel, recipientId, safeText)
     await Message.create({
       roomId: room._id,
       direction: 'outbound',
       sender: 'bot',
       content: safeText,
+      waMessageId: waMessageId ?? undefined,
+      timestamp: new Date(),
+    })
+  }
+
+  for (const product of (agentResponse.products as AgentProduct[]).slice(0, 4)) {
+    const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
+    const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
+    let waMessageId: string | null = null
+    if (product.imageUrl) {
+      waMessageId = await sendChannelImage(room.channel, recipientId, product.imageUrl, caption)
+    } else {
+      waMessageId = await sendChannelMessage(room.channel, recipientId, caption)
+    }
+    await Message.create({
+      roomId: room._id,
+      direction: 'outbound',
+      sender: 'bot',
+      content,
       waMessageId: waMessageId ?? undefined,
       timestamp: new Date(),
     })

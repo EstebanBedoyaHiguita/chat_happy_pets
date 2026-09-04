@@ -10,6 +10,7 @@ import {
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
+import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog } from './product-display'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -738,19 +739,10 @@ De este cliente NO tenemos su número de celular (no aparece en DATOS QUE YA CON
 - Deben ser 10 dígitos y empezar por 3. Si te dan algo distinto, pídelo de nuevo amablemente.
 - NO pidas el celular al inicio de la conversación ni lo repitas si ya te lo dieron: solo cuando estés recopilando los datos del pedido.
 
-`}⚠️ REGLA CRÍTICA — DATOS DE MASCOTA ANTES DE PRODUCTOS:
-Si NO tienes el tipo, nombre, edad Y peso de al menos una mascota, es OBLIGATORIO recopilarlos ANTES de mostrar cualquier producto o continuar el flujo de pedido. Esto aplica SIEMPRE, incluso si el cliente dice "sí" a ver los productos.
-
-Sigue este flujo de dos pasos:
-1. Primero pregunta SOLO el tipo: "¿Tienes perro o gato?" (puede tener ambos). Espera la respuesta.
-2. Una vez sepas el tipo, pide nombre, edad y peso en UN SOLO mensaje así:
-   "Me encantaría darte una recomendación personalizada 🐾 ¿Me regalas estos datos de tu [perro/gato]?
-   - Nombre
-   - Edad
-   - Peso"
-   Espera que el cliente responda con los tres datos. Si falta alguno, pídelo en el siguiente mensaje.
-
-Intenta recopilar los datos antes de mostrar productos, pero si el cliente no los da o insiste en ver los productos directamente, muéstralos igual. No te quedes bloqueado pidiendo datos que el cliente no quiere dar.
+`}⚠️ REGLA CRÍTICA — NUNCA COBRES UN PEAJE POR INFORMACIÓN:
+Si el cliente pregunta un precio o pide información, RESPÓNDELE. Nunca le exijas un dato a cambio.
+El tipo de mascota se pregunta en el MISMO mensaje en que ya diste la información, nunca antes de darla.
+Los datos de la mascota (nombre, edad, peso) se recogen durante la conversación, cuando encajen: no son requisito para mostrar precios ni productos.
 
 FORMATO DE RESPUESTA — CRÍTICO:
 ⛔ PROHIBIDO ABSOLUTAMENTE usar asteriscos, negritas, cursivas ni ningún markdown. NUNCA escribas **texto** ni *texto*. Si lo haces, arruinas la experiencia del cliente en WhatsApp.
@@ -776,33 +768,32 @@ Hay dos momentos distintos. NUNCA los confundas.
 
 MOMENTO 1 — Cliente pregunta por BARF, precios, dietas o pide información (incluso si es cliente recurrente sin productos elegidos aún):
 1. PRIMERO preséntate: "¡Hola [nombre]! Soy Sara, asesora de Happy Pets Family 🐾"
-2. Llama get_products y filtra las dietas BARF según el tipo de mascota:
-   - Si tiene PERRO (o no sabes el tipo todavía): muestra solo sabores para perro (Pollo, Res, Cordero, Pescado, Salmón, Conejo, Pollo con Frutas). NUNCA muestres los de gato.
-   - Si tiene GATO: muestra solo sabores para gato (Gato de Ternera, Gato de Pollo). NUNCA muestres los de perro.
-   - Si tiene ambos: muestra primero los de perro y luego los de gato, separados claramente.
-3. Lista los sabores correspondientes en TEXTO PLANO, SIN imágenes: nombre, precio y descripción corta.
-4. En el MISMO mensaje o en uno separado pregunta cuál le interesa.
-⛔ PROHIBIDO mostrar imágenes en este momento. PROHIBIDO enviar productos con foto aquí.
+2. Si todavía no sabes si tiene perro o gato: dale el rango de precios y pregúntaselo en el MISMO mensaje. Nunca le niegues el precio por no saberlo.
+3. Cuando ya sepas el tipo: muestra con imagen los sabores de la vitrina y menciona los demás solo en texto, preguntándole si quiere ver alguno.
+⛔ NUNCA muestres sabores de gato a quien tiene perro, ni al revés.
 
 MOMENTO 2 — Cliente menciona o elige un sabor específico (dijo "el de pollo", "la de pollo", "cordero", "salmón", "ese", "sí por favor" + nombre de sabor, "de pescado y conejo", etc.):
-⛔ NO des más información en texto. NO listes todos los productos de nuevo.
-1. Llama get_products, busca ESE producto y escribe su nombre, precio y la URL real de la imagen en tu respuesta.
+⛔ NO listes todos los productos de nuevo.
+1. Muestra ESE producto con su imagen: escribe su nombre, su precio y la URL real en tu respuesta.
 2. Si eligió varios sabores, muestra cada uno con su imagen.
 3. En el mismo mensaje pregunta cuántos paquetes quiere de cada uno.
 ⛔ NUNCA muestres más de 4 productos con imagen a la vez.
 
+⚠️ EN AMBOS MOMENTOS: los productos, precios e imágenes que debes usar te llegan en el bloque
+"PRODUCTOS PARA ESTE TURNO". Ese bloque manda sobre cualquier otra cosa: dice exactamente
+cuáles mostrar con foto y cuáles solo nombrar. No agregues productos que no estén ahí.
+
 ⛔ NO VENDEMOS AL POR MAYOR: Si el cliente pregunta por precio al por mayor, distribución o compras en grandes cantidades, responde amablemente que solo manejamos venta al detal y ofrece mostrar las opciones disponibles.
 
 ⚠️ REGLA CRÍTICA — PRODUCTOS E IMÁGENES:
-Puedes llamar get_products en dos casos:
-1. El cliente pregunta por precios, dietas o BARF → llama get_products y lista los resultados EN TEXTO con nombre y precio real del catálogo, SIN imágenes. Luego pregunta cuál le interesa.
-2. El cliente elige un sabor específico → llama get_products (si no lo tienes ya) y muestra ESE producto con imagen.
-⛔ NUNCA muestres imágenes cuando el cliente solo está preguntando por información o precios.
-⛔ Si acabas de hacer una pregunta ("¿cuál te interesa?"), ESPERA la respuesta antes de mostrar imágenes.
-Para clientes recurrentes: aunque ya hayan comprado antes, SIEMPRE pregunta primero "¿ya sabes qué vas a pedir o quieres que te muestre las opciones?" y espera su respuesta antes de mostrar cualquier producto con imagen.
+- Los precios e imágenes salen SIEMPRE del bloque "PRODUCTOS PARA ESTE TURNO" o de get_products. Nunca de tu memoria.
+- La foto le llega al cliente porque tú escribes la URL del producto en tu respuesta. Si no la escribes, no le llega ninguna foto.
+- Si el cliente ya vio un producto y pregunta un detalle puntual, responde del historial sin reenviar la imagen.
+⛔ Si acabas de hacer una pregunta ("¿cuál te interesa?"), ESPERA la respuesta antes de mostrar más productos.
+Para clientes recurrentes que ya saben qué van a pedir: no les abras la vitrina, muéstrales solo los sabores que nombraron y sigue con las cantidades.
 
 FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
-1. Si el cliente NO ha elegido productos BARF todavía (dijo "quiero hacer un pedido", "comida para X" o algo vago), pregúntale: "¿Ya sabes qué vas a pedir o quieres que te muestre las opciones de dieta BARF?" — espera su respuesta. NO llames get_products aquí. NO ofrezcas snacks todavía.
+1. Si el cliente NO ha elegido productos BARF todavía (dijo "quiero hacer un pedido", "comida para X" o algo vago), pregúntale: "¿Ya sabes qué vas a pedir o quieres que te muestre las opciones de dieta BARF?" — espera su respuesta. NO ofrezcas snacks todavía.
 2. ⚠️ CANTIDADES — OBLIGATORIO ANTES DE CONFIRMAR:
    - Cuando el cliente mencione uno o varios sabores (ej: "pollo" y "res", o "pollo fruta"), muestra PRIMERO la imagen de cada producto seleccionado (incluye la URL en tu respuesta), luego pregunta cuántos paquetes quiere de cada uno.
    - "Pollo fruta" o "pollo con frutas" es UN producto: Dieta Barf Pollo con Frutas. "Pollo" solo es otro: Dieta Barf Pollo. NUNCA los fusiones en uno.
@@ -987,6 +978,48 @@ Si NO hay que transferir, no incluyas ese JSON.`
     })
   }
 
+  // Datos de mascota que faltan. Va en su propio mensaje system y NO en pendingSteps:
+  // create_order se bloquea si pendingSteps trae algo, y un cliente que no quiso dar el
+  // peso de su perro no puede quedarse sin poder comprar.
+  const petMissing = [
+    !roomData.petName && 'nombre',
+    !roomData.petAge && 'edad',
+    !roomData.petWeight && 'peso',
+  ].filter(Boolean)
+  if (roomData.petType && petMissing.length > 0) {
+    messages.push({
+      role: 'system',
+      content:
+        `DATOS DE MASCOTA POR RECOPILAR (no urgente): ${petMissing.join(', ')}.\n` +
+        'Pídelos cuando encajen en la conversación, uno por vez y nunca antes de haber mostrado precios. ' +
+        'El peso pídelo como argumento de venta ("con el peso te digo cuántos paquetes le rinden al mes"), no como requisito. ' +
+        'NUNCA bloquees el pedido por falta de estos datos.',
+    })
+  }
+
+  // Productos reales de ESTE turno: precios e imágenes salen del catálogo, no del modelo.
+  // Se siembran en collectedProducts para que la foto pueda enviarse aunque el modelo no
+  // llame get_products — que es justo lo que pasaba cuando se inventaba precios.
+  const collectedImageUrls: string[] = []
+  const collectedProducts: AgentProduct[] = []
+  try {
+    const catalog = await getCatalog()
+    const barf = barfFor(catalog, roomData.petType)
+    for (const p of catalog) {
+      collectedProducts.push({ ...p, image: p.imageUrl })
+      if (p.imageUrl) collectedImageUrls.push(p.imageUrl)
+    }
+    const instruction = buildDisplayInstruction(
+      decideDisplay(userMessage, barf, catalog),
+      barf,
+      Boolean(roomData.petType)
+    )
+    if (instruction) messages.push({ role: 'system', content: instruction })
+  } catch (err) {
+    // Sin catálogo el agente sigue con get_products como siempre: nunca se cae por esto.
+    console.error('[AGENT] no se pudo cargar el catálogo para la vitrina:', err)
+  }
+
   if (mediaUrl) {
     messages.push({
       role: 'user',
@@ -1007,9 +1040,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
     tool_choice: 'auto',
   })
 
-  // Collect product data directly from product tool results
-  const collectedImageUrls: string[] = []
-  const collectedProducts: AgentProduct[] = []
+  // Los resultados de get_products se suman a lo ya sembrado desde el catálogo.
   const HAPPY_PETS_BASE = process.env.HAPPY_PETS_API_URL ?? ''
   let orderCreated = false
   // create_order se llamó pero la herramienta la rechazó (falta un dato, ya hay un
@@ -1111,10 +1142,12 @@ Si NO hay que transferir, no incluyas ese JSON.`
   // #WA-... plausible, normalmente el último +1) y lo escribe sin llamar a
   // create_order. El cliente recibe una confirmación de un pedido que no existe:
   // no está en /orders, no llega al Sheet y nadie lo despacha.
-  const ORDER_ANNOUNCE = /pedido\s+(registrado|actualizado)|#\s*WA-\d+/i
+  // "quedó" entre medio: el prompt de la BD dictaba "Tu pedido quedó registrado 🎉" y
+  // el regex pegado (pedido+registrado) no lo atrapaba, así que el fantasma se colaba.
+  const ORDER_ANNOUNCE = /pedido\s+(?:\S+\s+){0,2}(registrado|actualizado)|#\s*WA-\d+/i
   // Afirmación explícita de que el pedido quedó registrado (más estricta: citar un
   // #WA- no basta, eso también lo hacen lookup_order y el bloqueo de duplicado).
-  const ORDER_CONFIRM = /pedido\s+(registrado|actualizado)/i
+  const ORDER_CONFIRM = /pedido\s+(?:\S+\s+){0,2}(registrado|actualizado)/i
   // El modelo también se salta la línea "✅ Pedido registrado #..." y arranca directo
   // en el resumen de ítems: para el cliente es la misma confirmación (precios, datos
   // de pago, fecha de entrega) pero no contiene ninguna de las frases de arriba.
@@ -1183,9 +1216,14 @@ Si NO hay que transferir, no incluyas ese JSON.`
   // in its response. This lets the agent list products as plain text (no image URLs)
   // for the initial BARF presentation, and only show image cards when the client
   // selects a specific product and the agent includes that product's image URL.
-  const mentionedProducts = collectedProducts.filter(p =>
-    p.imageUrl && fullText.includes(p.imageUrl)
-  )
+  // Dedupe: un mismo producto puede venir del catálogo sembrado y de get_products.
+  const seenImages = new Set<string>()
+  const mentionedProducts = collectedProducts.filter(p => {
+    if (!p.imageUrl || !fullText.includes(p.imageUrl)) return false
+    if (seenImages.has(p.imageUrl)) return false
+    seenImages.add(p.imageUrl)
+    return true
+  })
 
   // Parse transfer signal from last line
   const lines = fullText.split('\n')
