@@ -747,12 +747,15 @@ Los datos de la mascota (nombre, edad, peso) se recogen durante la conversación
 FORMATO DE RESPUESTA — CRÍTICO:
 ⛔ PROHIBIDO ABSOLUTAMENTE usar asteriscos, negritas, cursivas ni ningún markdown. NUNCA escribas **texto** ni *texto*. Si lo haces, arruinas la experiencia del cliente en WhatsApp.
 - Escribe exactamente como en un WhatsApp real: texto plano, saltos de línea y emojis únicamente.
-- Al mostrar un producto NO escribas etiquetas como "Precio:", "Descripción:", "Imagen:". Escribe directamente el valor: el número del precio, el texto de la descripción y la URL de la imagen en líneas separadas.
-- Ejemplo correcto de producto:
+- Al mostrar un producto escribe ÚNICAMENTE la URL de su imagen, sola en su línea. La foto le llega al cliente con el nombre, el precio y la descripción ya incluidos: si tú también los escribes, los ve dos veces.
+- Ejemplo CORRECTO de producto (así, y nada más):
+  https://url-de-la-imagen.jpg
+- Ejemplo INCORRECTO — NUNCA escribas el producto así:
   🥩 Dieta Barf Pollo
   $4.300 COP
   Una opción económica y deliciosa para tu perro 🐶
   https://url-de-la-imagen.jpg
+- Los sabores que NO llevan foto sí se escriben en texto con nombre y precio. La regla de arriba aplica solo a los que llevan URL.
 - NUNCA digas que no puedes mostrar imágenes. Las imágenes se envían automáticamente al cliente. Si te preguntan, confirma que sí las enviaste.
 - SIEMPRE llama get_products SIN filtro de categoría para obtener el catálogo completo. El catálogo tiene más de 15 productos — nunca asumas que ya los conoces todos.
 - Cuando recibas el resultado de get_products, BUSCA en TODA la lista antes de decir que un producto no existe.
@@ -774,8 +777,8 @@ MOMENTO 1 — Cliente pregunta por BARF, precios, dietas o pide información (in
 
 MOMENTO 2 — Cliente menciona o elige un sabor específico (dijo "el de pollo", "la de pollo", "cordero", "salmón", "ese", "sí por favor" + nombre de sabor, "de pescado y conejo", etc.):
 ⛔ NO listes todos los productos de nuevo.
-1. Muestra ESE producto con su imagen: escribe su nombre, su precio y la URL real en tu respuesta.
-2. Si eligió varios sabores, muestra cada uno con su imagen.
+1. Muestra ESE producto con su imagen: escribe SOLO su URL real, sin nombre ni precio ni descripción (la foto ya los lleva).
+2. Si eligió varios sabores, escribe la URL de cada uno.
 3. En el mismo mensaje pregunta cuántos paquetes quiere de cada uno.
 ⛔ NUNCA muestres más de 4 productos con imagen a la vez.
 
@@ -1258,6 +1261,40 @@ Si NO hay que transferir, no incluyas ese JSON.`
   if (forceTransfer) {
     transfer = true
     transferReason = 'el bot anunció un pedido que no se pudo registrar'
+  }
+
+  // Lo único que sobra en el texto es describir el producto que ya sale como foto: la
+  // tarjeta lleva nombre, precio y descripción en su pie. Se quita ese bloque y NADA
+  // más — la frase que introduce, los sabores que van solo en texto y la pregunta final
+  // se conservan tal cual.
+  if (mentionedProducts.length > 0) {
+    const norm = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9$. ]/g, '').replace(/\s+/g, ' ').trim()
+
+    // Nombre → las líneas que puede arrastrar detrás (su precio y su descripción).
+    const blocks = new Map<string, Set<string>>()
+    for (const p of mentionedProducts) {
+      const extras = new Set<string>([norm(`$${p.price.toLocaleString('es-CO')} COP`)])
+      for (const l of (p.description ?? '').split('\n')) {
+        if (l.trim()) extras.add(norm(l))
+      }
+      blocks.set(norm(p.name), extras)
+    }
+
+    const lines = cleanText.split('\n')
+    const kept: string[] = []
+    for (let i = 0; i < lines.length; i++) {
+      const extras = blocks.get(norm(lines[i]))
+      if (!extras) {
+        kept.push(lines[i])
+        continue
+      }
+      // Se salta el nombre y solo lo que venga PEGADO debajo y sea suyo. Así una lista
+      // como "Dieta Barf Pescado / $6.400 COP" (que no es tarjeta) nunca se toca.
+      while (i + 1 < lines.length && extras.has(norm(lines[i + 1]))) i++
+    }
+    cleanText = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
   }
 
   return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: mentionedProducts, orderCreated }
