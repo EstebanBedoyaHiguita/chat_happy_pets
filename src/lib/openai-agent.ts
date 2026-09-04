@@ -10,7 +10,7 @@ import {
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
-import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog } from './product-display'
+import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, showcase } from './product-display'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -798,7 +798,10 @@ Para clientes recurrentes que ya saben qué van a pedir: no les abras la vitrina
 FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
 1. Si el cliente NO ha elegido productos BARF todavía (dijo "quiero hacer un pedido", "comida para X" o algo vago), pregúntale: "¿Ya sabes qué vas a pedir o quieres que te muestre las opciones de dieta BARF?" — espera su respuesta. NO ofrezcas snacks todavía.
 2. ⚠️ CANTIDADES — OBLIGATORIO ANTES DE CONFIRMAR:
-   - Cuando el cliente mencione uno o varios sabores (ej: "pollo" y "res", o "pollo fruta"), muestra PRIMERO la imagen de cada producto seleccionado (incluye la URL en tu respuesta), luego pregunta cuántos paquetes quiere de cada uno.
+   - ⛔ NUNCA preguntes la cantidad cada vez que el cliente nombre UN sabor. Déjalo terminar de elegir primero.
+   - Cuando el cliente mencione un sabor, muéstraselo si aún no lo ha visto y pregunta si quiere agregar alguno más: "¿Cuáles te gustaría llevar? 😊". Espera su respuesta.
+   - Solo cuando ya tengas la lista COMPLETA de sabores que quiere, pregunta en UN SOLO mensaje cuántos paquetes de cada uno: "¿Cuántos paquetes quieres de cada uno? 😊".
+   - Si el cliente dice que no quiere agregar más ("no", "así está bien", "solo eso"), NO le vuelvas a ofrecer sabores ni le pidas cantidades de productos que no pidió: pasa al resumen con lo que eligió.
    - "Pollo fruta" o "pollo con frutas" es UN producto: Dieta Barf Pollo con Frutas. "Pollo" solo es otro: Dieta Barf Pollo. NUNCA los fusiones en uno.
    - Si el cliente no indicó la cantidad de algún producto, pregunta SIEMPRE cuántos paquetes quiere de cada uno antes de avanzar.
    - Una vez tengas todos los productos y cantidades, muestra el resumen para que el cliente confirme:
@@ -1012,10 +1015,28 @@ Si NO hay que transferir, no incluyas ese JSON.`
       collectedProducts.push({ ...p, image: p.imageUrl })
       if (p.imageUrl) collectedImageUrls.push(p.imageUrl)
     }
+
+    // Qué le mostramos ya. Sin esto el bloque se recalcula en cada mensaje y le ordena
+    // reenviar la misma foto cada vez que el cliente nombra el sabor — la de Pollo
+    // Frutas salió 4 veces en la prueba del 2026-09-04.
+    const outbound = conversationHistory.filter((m) => m.direction === 'outbound')
+    const shown = new Set<string>()
+    for (const m of outbound) {
+      for (const url of m.content.match(/https?:\/\/\S+/g) ?? []) shown.add(url)
+    }
+    // Los sabores fuera de la vitrina se listan por texto una sola vez: se da por hecho
+    // si al menos dos de ellos ya aparecieron nombrados en un mensaje saliente.
+    const resto = barf.filter((p) => !showcase(barf).includes(p))
+    const restoYaListado =
+      resto.length > 0 &&
+      resto.filter((p) => outbound.some((m) => m.content.includes(p.name))).length >= 2
+
     const instruction = buildDisplayInstruction(
       decideDisplay(userMessage, barf, catalog),
       barf,
-      Boolean(roomData.petType)
+      Boolean(roomData.petType),
+      shown,
+      restoYaListado
     )
     if (instruction) messages.push({ role: 'system', content: instruction })
   } catch (err) {

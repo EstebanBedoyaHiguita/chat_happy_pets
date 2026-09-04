@@ -224,22 +224,45 @@ const CARD_RULE =
 export function buildDisplayInstruction(
   decision: DisplayDecision,
   barf: CatalogProduct[],
-  petTypeKnown: boolean
+  petTypeKnown: boolean,
+  /** URLs de fotos que el cliente YA recibió en esta conversación. */
+  shown: Set<string> = new Set(),
+  /** true si ya se le listaron por texto los sabores que no van en la vitrina. */
+  restoYaListado = false
 ): string {
   if (barf.length === 0) return ''
 
   const prices = barf.map((p) => p.price)
   const rango = `${cop(Math.min(...prices))} a ${cop(Math.max(...prices))}`
+  const noRepetirResto = restoYaListado
+    ? '\n⛔ Ya le mencionaste los demás sabores antes. NO vuelvas a listarlos: el cliente ya sabe que existen.'
+    : ''
 
   if (decision.mode === 'seleccion') {
+    const nuevos = decision.selected.filter((p) => !shown.has(p.imageUrl)).slice(0, 4)
+    const repetidos = decision.selected.filter((p) => shown.has(p.imageUrl))
+
+    // Todo lo que nombró ya lo vio: no se le reenvía nada, se avanza la venta.
+    if (nuevos.length === 0) {
+      return (
+        `PRODUCTOS PARA ESTE TURNO:\n` +
+        `⛔ Ya le enviaste la foto de ${repetidos.map((p) => p.name).join(', ')} en esta conversación. ` +
+        `NO la vuelvas a enviar ni escribas su URL: el cliente ya la tiene.\n` +
+        `Responde en texto y avanza con el pedido.${noRepetirResto}`
+      )
+    }
+
     const header = decision.ambiguous
       ? 'El cliente nombró un sabor de forma imprecisa y hay más de una opción posible. ' +
         'Muéstrale ESTAS y pregúntale cuál quiere. No elijas tú por él:'
-      : 'El cliente eligió estos sabores. Muéstrale SOLO estos y pregúntale cuántos paquetes quiere de cada uno:'
+      : 'El cliente eligió estos sabores y todavía no ha visto su foto. Muéstrale SOLO estos:'
+    const yaVistos = repetidos.length
+      ? `\n⛔ De ${repetidos.map((p) => p.name).join(', ')} ya le enviaste la foto: NO la repitas.`
+      : ''
     return (
       `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n${header}\n` +
-      decision.selected.slice(0, 4).map(line).join('\n\n') +
-      `\n\n${CARD_RULE}No listes otros sabores en este mensaje.`
+      nuevos.map(line).join('\n\n') +
+      `\n\n${CARD_RULE}No listes otros sabores en este mensaje.${yaVistos}${noRepetirResto}`
     )
   }
 
@@ -252,8 +275,19 @@ export function buildDisplayInstruction(
   }
 
   const vitrina = showcase(barf)
+  const nuevosVitrina = vitrina.filter((p) => !shown.has(p.imageUrl))
+
+  // La vitrina se abre UNA vez. Si ya la vio, el turno es de conversación, no de catálogo.
+  if (nuevosVitrina.length === 0) {
+    return (
+      `PRODUCTOS PARA ESTE TURNO:\n` +
+      `⛔ Ya le mostraste las dietas BARF con foto en esta conversación. NO las vuelvas a enviar ` +
+      `ni escribas ninguna URL. Responde lo que te preguntó y avanza con el pedido.${noRepetirResto}`
+    )
+  }
+
   const resto = barf.filter((p) => !vitrina.includes(p))
-  const restoTexto = resto.length
+  const restoTexto = resto.length && !restoYaListado
     ? '\nEn tu texto sí menciona estos otros sabores, SOLO por nombre y precio (sin URL, sin foto), ' +
       'y pregúntale si quiere ver alguno:\n' +
       resto.map((p) => `${p.name} — ${cop(p.price)}`).join('\n')
@@ -261,9 +295,10 @@ export function buildDisplayInstruction(
 
   return (
     `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n` +
-    `El cliente está conociendo el catálogo. Estos ${vitrina.length} sabores van con foto:\n` +
-    vitrina.map(line).join('\n\n') +
+    `El cliente está conociendo el catálogo. Estos ${nuevosVitrina.length} sabores van con foto:\n` +
+    nuevosVitrina.map(line).join('\n\n') +
     `\n\n${CARD_RULE}` +
-    restoTexto
+    restoTexto +
+    noRepetirResto
   )
 }
