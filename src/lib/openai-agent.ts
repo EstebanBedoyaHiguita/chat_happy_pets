@@ -10,7 +10,7 @@ import {
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
-import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, showcase } from './product-display'
+import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog } from './product-display'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -1016,27 +1016,20 @@ Si NO hay que transferir, no incluyas ese JSON.`
       if (p.imageUrl) collectedImageUrls.push(p.imageUrl)
     }
 
-    // Qué le mostramos ya. Sin esto el bloque se recalcula en cada mensaje y le ordena
-    // reenviar la misma foto cada vez que el cliente nombra el sabor — la de Pollo
-    // Frutas salió 4 veces en la prueba del 2026-09-04.
-    const outbound = conversationHistory.filter((m) => m.direction === 'outbound')
+    // Qué fotos ya recibió: se leen las URLs de los mensajes salientes del historial.
+    // Se usa solo para no reenviar un sabor que el cliente acaba de elegir; una pregunta
+    // por el catálogo siempre puede responderse con fotos, la haya hecho antes o no.
     const shown = new Set<string>()
-    for (const m of outbound) {
+    for (const m of conversationHistory) {
+      if (m.direction !== 'outbound') continue
       for (const url of m.content.match(/https?:\/\/\S+/g) ?? []) shown.add(url)
     }
-    // Los sabores fuera de la vitrina se listan por texto una sola vez: se da por hecho
-    // si al menos dos de ellos ya aparecieron nombrados en un mensaje saliente.
-    const resto = barf.filter((p) => !showcase(barf).includes(p))
-    const restoYaListado =
-      resto.length > 0 &&
-      resto.filter((p) => outbound.some((m) => m.content.includes(p.name))).length >= 2
 
     const instruction = buildDisplayInstruction(
       decideDisplay(userMessage, barf, catalog),
       barf,
       Boolean(roomData.petType),
-      shown,
-      restoYaListado
+      shown
     )
     if (instruction) messages.push({ role: 'system', content: instruction })
   } catch (err) {

@@ -166,6 +166,20 @@ export function decideDisplay(
   })
 
   const bestBarfHit = Math.max(0, ...full.map((p) => flavorTokens(p.name).length))
+
+  // El cliente responde "Frutas" a "¿cuál te interesa?". No completa los dos tokens de
+  // "Pollo Frutas", pero ningún otro sabor lleva "fruta", así que identifica el producto
+  // sin ambigüedad. Hace falta para distinguir "está eligiendo" de "está preguntando por
+  // el catálogo": sin esto, elegir un sabor reabre la vitrina entera.
+  if (full.length === 0 && otherHit === 0) {
+    const unico = barf.filter((p) =>
+      flavorTokens(p.name).some(
+        (t) => said.has(t) && barf.filter((q) => flavorTokens(q.name).includes(t)).length === 1
+      )
+    )
+    if (unico.length > 0) return { mode: 'seleccion', selected: unico, ambiguous: false }
+  }
+
   if (full.length === 0 || otherHit >= bestBarfHit) {
     return { mode: 'descubrimiento', selected: [], ambiguous: false }
   }
@@ -226,29 +240,27 @@ export function buildDisplayInstruction(
   barf: CatalogProduct[],
   petTypeKnown: boolean,
   /** URLs de fotos que el cliente YA recibió en esta conversación. */
-  shown: Set<string> = new Set(),
-  /** true si ya se le listaron por texto los sabores que no van en la vitrina. */
-  restoYaListado = false
+  shown: Set<string> = new Set()
 ): string {
   if (barf.length === 0) return ''
 
   const prices = barf.map((p) => p.price)
   const rango = `${cop(Math.min(...prices))} a ${cop(Math.max(...prices))}`
-  const noRepetirResto = restoYaListado
-    ? '\n⛔ Ya le mencionaste los demás sabores antes. NO vuelvas a listarlos: el cliente ya sabe que existen.'
-    : ''
 
   if (decision.mode === 'seleccion') {
+    // Le mostraste las opciones y el cliente eligió una de ellas: no tiene sentido
+    // reenviarle la misma foto. Solo van los sabores que todavía no ha visto.
     const nuevos = decision.selected.filter((p) => !shown.has(p.imageUrl)).slice(0, 4)
-    const repetidos = decision.selected.filter((p) => shown.has(p.imageUrl))
+    const vistos = decision.selected.filter((p) => shown.has(p.imageUrl))
 
-    // Todo lo que nombró ya lo vio: no se le reenvía nada, se avanza la venta.
     if (nuevos.length === 0) {
       return (
         `PRODUCTOS PARA ESTE TURNO:\n` +
-        `⛔ Ya le enviaste la foto de ${repetidos.map((p) => p.name).join(', ')} en esta conversación. ` +
-        `NO la vuelvas a enviar ni escribas su URL: el cliente ya la tiene.\n` +
-        `Responde en texto y avanza con el pedido.${noRepetirResto}`
+        `El cliente eligió ${vistos.map((p) => p.name).join(', ')}, que YA le mostraste con foto ` +
+        `en esta conversación.\n` +
+        `⛔ NO vuelvas a enviar esa foto ni escribas su URL: el cliente ya la tiene.\n` +
+        `⛔ NO vuelvas a listar los demás sabores: ya se los mencionaste.\n` +
+        `Responde en texto y avanza con el pedido.`
       )
     }
 
@@ -256,13 +268,13 @@ export function buildDisplayInstruction(
       ? 'El cliente nombró un sabor de forma imprecisa y hay más de una opción posible. ' +
         'Muéstrale ESTAS y pregúntale cuál quiere. No elijas tú por él:'
       : 'El cliente eligió estos sabores y todavía no ha visto su foto. Muéstrale SOLO estos:'
-    const yaVistos = repetidos.length
-      ? `\n⛔ De ${repetidos.map((p) => p.name).join(', ')} ya le enviaste la foto: NO la repitas.`
+    const yaVistos = vistos.length
+      ? `\n⛔ De ${vistos.map((p) => p.name).join(', ')} ya le enviaste la foto: NO la repitas.`
       : ''
     return (
       `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n${header}\n` +
       nuevos.map(line).join('\n\n') +
-      `\n\n${CARD_RULE}No listes otros sabores en este mensaje.${yaVistos}${noRepetirResto}`
+      `\n\n${CARD_RULE}No listes otros sabores en este mensaje.${yaVistos}`
     )
   }
 
@@ -274,31 +286,34 @@ export function buildDisplayInstruction(
     )
   }
 
+  // Pregunta de catálogo ("¿qué precio tiene la BARF?"): la vitrina SIEMPRE se muestra,
+  // aunque el cliente ya la haya visto antes. Aquí NO se aplica `shown`: hacerlo dejó al
+  // bot respondiendo precios sin una sola foto (2026-09-04). La memoria de lo ya enviado
+  // solo tiene sentido en el modo selección, para no repetir el sabor que acaba de pedir.
   const vitrina = showcase(barf)
-  const nuevosVitrina = vitrina.filter((p) => !shown.has(p.imageUrl))
-
-  // La vitrina se abre UNA vez. Si ya la vio, el turno es de conversación, no de catálogo.
-  if (nuevosVitrina.length === 0) {
-    return (
-      `PRODUCTOS PARA ESTE TURNO:\n` +
-      `⛔ Ya le mostraste las dietas BARF con foto en esta conversación. NO las vuelvas a enviar ` +
-      `ni escribas ninguna URL. Responde lo que te preguntó y avanza con el pedido.${noRepetirResto}`
-    )
-  }
-
   const resto = barf.filter((p) => !vitrina.includes(p))
-  const restoTexto = resto.length && !restoYaListado
+  const restoTexto = resto.length
     ? '\nEn tu texto sí menciona estos otros sabores, SOLO por nombre y precio (sin URL, sin foto), ' +
       'y pregúntale si quiere ver alguno:\n' +
       resto.map((p) => `${p.name} — ${cop(p.price)}`).join('\n')
     : ''
 
+  // Si ya las envió, la vitrina sigue disponible (una pregunta de precios SIEMPRE debe
+  // poder responderse con fotos, aunque el cliente ya haya preguntado antes), pero se
+  // avisa para que no las reenvíe al responder cosas como "10" o "no".
+  const yaEnviadas = vitrina.every((p) => shown.has(p.imageUrl))
+  const aviso = yaEnviadas
+    ? `\n\n⚠️ Estas fotos YA se las enviaste en esta conversación. Reenvíalas SOLO si te está ` +
+      `pidiendo ver las opciones otra vez. Si está respondiendo a otra cosa (una cantidad, un ` +
+      `"sí", un "no"), NO escribas ninguna URL y sigue con el pedido.`
+    : ''
+
   return (
     `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n` +
-    `El cliente está conociendo el catálogo. Estos ${nuevosVitrina.length} sabores van con foto:\n` +
-    nuevosVitrina.map(line).join('\n\n') +
+    `El cliente está conociendo el catálogo. Estos ${vitrina.length} sabores van con foto:\n` +
+    vitrina.map(line).join('\n\n') +
     `\n\n${CARD_RULE}` +
     restoTexto +
-    noRepetirResto
+    aviso
   )
 }
