@@ -11,6 +11,7 @@ import {
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
 import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, stripCardEcho } from './product-display'
+import { cierraListaDeSabores, faltanCantidades } from './order-flow'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -1012,12 +1013,29 @@ Si NO hay que transferir, no incluyas ese JSON.`
       collectedProducts.push({ ...p, image: p.imageUrl })
       if (p.imageUrl) collectedImageUrls.push(p.imageUrl)
     }
-    const instruction = buildDisplayInstruction(
-      decideDisplay(userMessage, barf, catalog),
-      barf,
-      Boolean(roomData.petType)
-    )
+    const decision = decideDisplay(userMessage, barf, catalog)
+    const instruction = buildDisplayInstruction(decision, barf, Boolean(roomData.petType))
     if (instruction) messages.push({ role: 'system', content: instruction })
+
+    // El cliente cerró la lista de sabores y todavía no dijo cuántos quiere. El prompt
+    // ya se lo ordena y el modelo lo desobedeció: el 2026-09-04 saltó al resumen con
+    // "1 paquete" inventado de cada sabor. Se le recuerda aquí, en un system tardío.
+    // 'ninguno' garantiza que el mensaje no nombró ningún sabor: es un cierre, no una
+    // elección más. Va fuera de pendingSteps para no bloquear create_order.
+    if (
+      decision.mode === 'ninguno' &&
+      cierraListaDeSabores(userMessage) &&
+      faltanCantidades(conversationHistory)
+    ) {
+      messages.push({
+        role: 'system',
+        content:
+          'EL CLIENTE ACABA DE CERRAR LA LISTA DE SABORES y todavía NO te ha dicho cuántos quiere.\n' +
+          'Pregúntale AHORA, en un solo mensaje: "¿Cuántos paquetes quieres de cada uno? 😊".\n' +
+          '⛔ NO muestres el resumen del pedido en este turno.\n' +
+          '⛔ NUNCA asumas una cantidad. Inventar "1 paquete" crea un pedido que el cliente no hizo.',
+      })
+    }
   } catch (err) {
     // Sin catálogo el agente sigue con get_products como siempre: nunca se cae por esto.
     console.error('[AGENT] no se pudo cargar el catálogo para la vitrina:', err)
