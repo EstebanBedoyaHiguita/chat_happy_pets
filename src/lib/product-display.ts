@@ -125,13 +125,33 @@ export function showcase(barf: CatalogProduct[]): CatalogProduct[] {
 }
 
 export interface DisplayDecision {
-  /** 'seleccion': el cliente nombró sabores. 'descubrimiento': todavía está mirando. */
-  mode: 'seleccion' | 'descubrimiento'
+  /**
+   * 'seleccion': el cliente nombró sabores. 'descubrimiento': está mirando el catálogo.
+   * 'ninguno': el turno NO va de productos ("no", "2", "gracias") y no se inyecta nada.
+   */
+  mode: 'seleccion' | 'descubrimiento' | 'ninguno'
   /** En selección, los sabores en juego. Si son varios, hay que desambiguar. */
   selected: CatalogProduct[]
   /** True cuando el cliente fue impreciso ("pollo") y hay más de un sabor posible. */
   ambiguous: boolean
 }
+
+/**
+ * Palabras que delatan que el turno SÍ es sobre el catálogo. Si el mensaje no trae
+ * ninguna de estas ni nombra un sabor, el turno es 'ninguno' y NO se inyecta bloque de
+ * productos: un "no", un "2" o un "gracias" caían en descubrimiento y le reabrían la
+ * vitrina con la lista de los otros sabores en cada mensaje (2026-09-04).
+ * Se pasan por tokens() para que queden singularizadas igual que el mensaje entrante.
+ */
+const CATALOG_INTENT = new Set(
+  tokens(
+    'barf dieta dietas comida comidas alimento alimentos precio precios costo costos ' +
+      'cuesta cuestan valor valores vale sabor sabores opcion opciones producto productos ' +
+      'catalogo menu ver mostrar muestra muestrame ensename foto fotos imagen imagenes ' +
+      'otra otras otro otros tienen tienes disponible disponibles ' +
+      'perro perros perrito perritos gato gatos gatico gaticos cachorro cachorros'
+  )
+)
 
 /**
  * Decide el modo a partir del mensaje del cliente. Compara por token completo contra
@@ -166,7 +186,26 @@ export function decideDisplay(
   })
 
   const bestBarfHit = Math.max(0, ...full.map((p) => flavorTokens(p.name).length))
+
+  // Un token que identifica a UN SOLO sabor ya es una elección. El cliente responde
+  // "Frutas" a "¿cuál te interesa?": no completa los dos tokens de "Pollo Frutas", pero
+  // ningún otro sabor lleva "fruta". Sin esto cae en descubrimiento y elegir un sabor le
+  // reabre la vitrina entera — pasó el 2026-09-04 con "Frutas".
+  const unico =
+    full.length === 0 && otherHit === 0
+      ? barf.filter((p) =>
+          flavorTokens(p.name).some(
+            (t) => said.has(t) && barf.filter((q) => flavorTokens(q.name).includes(t)).length === 1
+          )
+        )
+      : []
+  if (unico.length > 0) return { mode: 'seleccion', selected: unico, ambiguous: false }
+
   if (full.length === 0 || otherHit >= bestBarfHit) {
+    // Ni sabores ni palabras de catálogo: el turno no va de productos. Se devuelve
+    // 'ninguno' para no inyectar nada, en vez de caer en descubrimiento por descarte.
+    const hablaDelCatalogo = otherHit > 0 || [...said].some((t) => CATALOG_INTENT.has(t))
+    if (!hablaDelCatalogo) return { mode: 'ninguno', selected: [], ambiguous: false }
     return { mode: 'descubrimiento', selected: [], ambiguous: false }
   }
 
@@ -227,6 +266,9 @@ export function buildDisplayInstruction(
   petTypeKnown: boolean
 ): string {
   if (barf.length === 0) return ''
+  // Turno que no va de productos: sin bloque. Nunca dice "no envíes la URL" — solo
+  // se calla, para no poder apagar una foto que el cliente sí pidió.
+  if (decision.mode === 'ninguno') return ''
 
   const prices = barf.map((p) => p.price)
   const rango = `${cop(Math.min(...prices))} a ${cop(Math.max(...prices))}`
@@ -235,7 +277,9 @@ export function buildDisplayInstruction(
     const header = decision.ambiguous
       ? 'El cliente nombró un sabor de forma imprecisa y hay más de una opción posible. ' +
         'Muéstrale ESTAS y pregúntale cuál quiere. No elijas tú por él:'
-      : 'El cliente eligió estos sabores. Muéstrale SOLO estos y pregúntale cuántos paquetes quiere de cada uno:'
+      : 'El cliente nombró estos sabores. Muéstrale SOLO estos y pregúntale si quiere agregar ' +
+        'otro sabor. ⛔ NO le pidas cantidades todavía: las cantidades se preguntan UNA sola vez, ' +
+        'cuando ya tenga cerrada la lista de sabores:'
     return (
       `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n${header}\n` +
       decision.selected.slice(0, 4).map(line).join('\n\n') +
@@ -266,4 +310,57 @@ export function buildDisplayInstruction(
     `\n\n${CARD_RULE}` +
     restoTexto
   )
+}
+
+/**
+ * Quita del texto lo que ya viaja en el pie de una foto.
+ *
+ * Cada producto se envía como tarjeta (foto + nombre + precio + descripción, armada por
+ * el webhook). Si el modelo además los escribe, el cliente los lee dos veces — pasó el
+ * 2026-09-04. CARD_RULE se lo pide en el prompt y no obedece, así que se hace en código.
+ *
+ * Borra una línea SOLO si todas sus palabras son de UN producto cuya foto va en este
+ * mismo turno. Lo que eso conserva a propósito:
+ *  - "Dieta Barf Pescado — $6.400 COP" cuando la foto de Pescado NO va: es la lista de
+ *    los otros sabores, la única forma en que el cliente sabe que existen.
+ *  - "¿Pollo o Res?": mezcla dos productos, no es el eco de uno.
+ *  - "Perfecto, entonces quieres la Dieta Barf Pollo con Frutas": trae palabras propias.
+ *  - Cualquier línea con URL: apagar una foto es justo lo que rompió el flujo.
+ */
+export function stripCardEcho(
+  text: string,
+  productos: { name: string; price: number }[]
+): string {
+  if (productos.length === 0) return text
+
+  const RELLENO = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'y', 'a', 'en', 'cop'])
+  const palabras = (t: string) =>
+    t
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(' ')
+      .filter(Boolean)
+
+  // Un set POR producto: la línea debe ser de uno solo, no de la mezcla de todos.
+  const porProducto = productos.map((p) => {
+    const propias = new Set<string>()
+    for (const w of palabras(p.name)) propias.add(w)
+    for (const w of palabras(String(p.price))) propias.add(w)
+    for (const w of palabras(p.price.toLocaleString('es-CO'))) propias.add(w)
+    return propias
+  })
+
+  return text
+    .split('\n')
+    .filter((linea) => {
+      if (linea.includes('http')) return true
+      const ws = palabras(linea).filter((w) => !RELLENO.has(w))
+      if (ws.length === 0) return true
+      return !porProducto.some((propias) => ws.every((w) => propias.has(w)))
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }

@@ -10,7 +10,7 @@ import {
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
-import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog } from './product-display'
+import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, stripCardEcho } from './product-display'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -776,7 +776,8 @@ MOMENTO 2 — Cliente menciona o elige un sabor específico (dijo "el de pollo",
 ⛔ NO listes todos los productos de nuevo.
 1. Muestra ESE producto con su imagen: escribe su nombre, su precio y la URL real en tu respuesta.
 2. Si eligió varios sabores, muestra cada uno con su imagen.
-3. En el mismo mensaje pregunta cuántos paquetes quiere de cada uno.
+3. En el mismo mensaje pregúntale si quiere agregar otro sabor: "¿Quieres agregar algún otro sabor? 😊".
+⛔ NO le preguntes cantidades aquí: todavía está eligiendo, no está cerrando el pedido.
 ⛔ NUNCA muestres más de 4 productos con imagen a la vez.
 
 ⚠️ EN AMBOS MOMENTOS: los productos, precios e imágenes que debes usar te llegan en el bloque
@@ -795,9 +796,11 @@ Para clientes recurrentes que ya saben qué van a pedir: no les abras la vitrina
 FLUJO DE PEDIDO — SIGUE ESTE ORDEN EXACTO. NO SALTES NINGÚN PASO:
 1. Si el cliente NO ha elegido productos BARF todavía (dijo "quiero hacer un pedido", "comida para X" o algo vago), pregúntale: "¿Ya sabes qué vas a pedir o quieres que te muestre las opciones de dieta BARF?" — espera su respuesta. NO ofrezcas snacks todavía.
 2. ⚠️ CANTIDADES — OBLIGATORIO ANTES DE CONFIRMAR:
-   - Cuando el cliente mencione uno o varios sabores (ej: "pollo" y "res", o "pollo fruta"), muestra PRIMERO la imagen de cada producto seleccionado (incluye la URL en tu respuesta), luego pregunta cuántos paquetes quiere de cada uno.
+   - ⛔ NUNCA preguntes la cantidad cada vez que el cliente nombre UN sabor. Primero está eligiendo: déjalo terminar.
+   - Cuando mencione uno o varios sabores, muestra la imagen de cada uno (incluye la URL en tu respuesta) y pregúntale si quiere agregar otro: "¿Quieres agregar algún otro sabor? 😊". Espera su respuesta.
+   - Solo cuando la lista de sabores esté cerrada (dijo "no", "así está bien", "solo eso", o ya te dio las cantidades), pregunta en UN SOLO mensaje: "¿Cuántos paquetes quieres de cada uno? 😊".
    - "Pollo fruta" o "pollo con frutas" es UN producto: Dieta Barf Pollo con Frutas. "Pollo" solo es otro: Dieta Barf Pollo. NUNCA los fusiones en uno.
-   - Si el cliente no indicó la cantidad de algún producto, pregunta SIEMPRE cuántos paquetes quiere de cada uno antes de avanzar.
+   - Si al cerrar la lista falta la cantidad de algún producto, pídela antes de mostrar el resumen. Nunca inventes una cantidad.
    - Una vez tengas todos los productos y cantidades, muestra el resumen para que el cliente confirme:
      "Perfecto, entonces tu pedido sería:
      🐔 X paquete(s) Dieta Barf Pollo
@@ -1259,6 +1262,12 @@ Si NO hay que transferir, no incluyas ese JSON.`
     transfer = true
     transferReason = 'el bot anunció un pedido que no se pudo registrar'
   }
+
+  // Cada foto se envía como tarjeta con nombre, precio y descripción en su pie (los
+  // arma el webhook, no el modelo). Si el modelo ADEMÁS los escribe, el cliente los lee
+  // dos veces. La regla ya está en el prompt (CARD_RULE) y el modelo la desobedece, así
+  // que se aplica en código. La lógica vive en product-display.ts para poder probarla.
+  cleanText = stripCardEcho(cleanText, mentionedProducts)
 
   return { text: cleanText, transfer, transferReason, imageUrls: collectedImageUrls, products: mentionedProducts, orderCreated }
 }
