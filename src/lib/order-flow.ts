@@ -62,3 +62,28 @@ export function faltanCantidades(historial: { direction: string; content: string
   )
   return !dijoCantidad
 }
+
+/**
+ * ¿La dirección sirve para entregar?
+ *
+ * El 2026-09-04 se creó el pedido WA-1788504118729 con `address: "Medellín"`: Sara
+ * pidió la dirección, el cliente respondió "Si", y ella siguió preguntando la CIUDAD
+ * y guardó la ciudad como dirección. Nadie puede entregar ahí.
+ *
+ * Una dirección colombiana real siempre trae número ("Cra 43 # 54-62", "Calle 10 #5-20"),
+ * así que se exige: no vacía, distinta de la ciudad, y con al menos un dígito. Es
+ * deliberadamente laxa — no valida el formato, solo que no sea basura.
+ */
+export function direccionEsUtil(address?: string, ciudad?: string): boolean {
+  const dir = normalizar(address ?? '')
+  if (!dir) return false
+  if (!/\d/.test(dir)) return false
+
+  // "Medellín" o "Medellín, Medellín": quitada la ciudad no queda nada que entregar.
+  const city = normalizar(ciudad ?? '')
+  if (city) {
+    const sinCiudad = dir.split(' ').filter((w) => !city.split(' ').includes(w)).join(' ')
+    if (!sinCiudad.trim() || !/\d/.test(sinCiudad)) return false
+  }
+  return true
+}

@@ -24,10 +24,15 @@ async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
     else if (/\b(gato|gatita|gatito|felino)\b/i.test(text)) update.petType = 'Gato'
   }
 
-  // Extract pet name: capitalized word(s) at start of message before "tiene", "pesa", "es" or a comma
+  // Extract pet name: capitalized word(s) at start of message before "tiene", "pesa", "es" or a comma.
+  // Sin la bandera /i (la tenía y anulaba la exigencia de mayúscula que este comentario
+  // describe): el 2026-09-04 "Que precio tiene la dieta barf?" dejó petName = "Que precio",
+  // y con el nombre ya "lleno" el agente nunca lo preguntó.
   if (!room.petName) {
-    const nameMatch = text.match(/^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{1,20}(?:\s[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{1,20})?)(?:\s*,|\s+tiene|\s+pesa|\s+es\s)/i)
-    if (nameMatch) update.petName = nameMatch[1]
+    const nameMatch = text.match(/^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{1,20}(?:\s[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{1,20})?)(?:\s*,|\s+tiene|\s+pesa|\s+es\s)/)
+    // Un saludo o una pregunta al inicio no son el nombre de la mascota.
+    const NO_ES_NOMBRE = /^(que|qué|cual|cuál|cuanto|cuánto|como|cómo|donde|dónde|hola|buenas|buenos|si|sí|no|mi|el|la|los|las|un|una|tengo|quiero|necesito|me|te|se|hay|ya|gracias)$/i
+    if (nameMatch && !NO_ES_NOMBRE.test(nameMatch[1].split(' ')[0])) update.petName = nameMatch[1]
   }
 
   const ageMatch = text.match(/(\d+)\s*a[ñn]os?/i)

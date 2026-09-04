@@ -11,7 +11,7 @@ import {
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
 import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, stripCardEcho } from './product-display'
-import { cierraListaDeSabores, faltanCantidades } from './order-flow'
+import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -327,6 +327,21 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         if (!matchedCity && citiesList.length > 0) {
           result = { status: 'error', message: `La ciudad "${cityNameArg}" no está disponible. Ciudades disponibles: ${citiesList.map(c => c.name).join(', ')}.` }
           break
+        }
+
+        // Hard block: sin dirección no hay entrega, y NO existía ninguna validación.
+        // El 2026-09-04 se creó WA-1788504118729 con address "Medellín": Sara pidió la
+        // dirección, el cliente respondió "Si", ella preguntó la CIUDAD y guardó la
+        // ciudad como dirección. Se exige una dirección con número y distinta de la
+        // ciudad — no se valida el formato, solo que sea entregable.
+        if (!direccionEsUtil(args.address as string | undefined, cityNameArg)) {
+          const loQueDio = ((args.address as string) ?? '').trim()
+          return JSON.stringify({
+            status: 'error',
+            instruction: loQueDio
+              ? `NO puedes crear el pedido: "${loQueDio}" no es una dirección de entrega, es una ciudad o un dato incompleto. La ciudad ya la tienes aparte. Pídele la dirección EXACTA: "¿Me regalas la dirección exacta de entrega? 🏠 (calle o carrera con números, y apartamento o local si aplica)". Espera su respuesta, guárdala con update_customer_info (address) y vuelve a llamar create_order con esa dirección.`
+              : 'NO puedes crear el pedido todavía. FALTA la dirección de entrega. Pídesela: "¿Me regalas la dirección exacta de entrega? 🏠 (calle o carrera con números, y apartamento o local si aplica)". ⛔ Un "sí" NO es una dirección: espera a que te escriba la dirección real, guárdala con update_customer_info (address) y vuelve a llamar create_order con ella.',
+          })
         }
 
         const realCityId = (matchedCity?._id ?? args.cityId) as string
