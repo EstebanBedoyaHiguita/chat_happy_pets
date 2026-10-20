@@ -18,6 +18,21 @@ export interface BotOrderEdit {
   reason?: string
 }
 
+/**
+ * Aviso al agente de pedidos del proveedor (ver supplier-dispatch.ts).
+ * queued → sent → confirmed, o review cuando algo no cuadra y debe verlo un humano.
+ */
+export type SupplierStatus = 'queued' | 'sent' | 'confirmed' | 'review'
+
+export interface BotOrderSupplier {
+  status: SupplierStatus
+  queuedAt?: Date
+  sentAt?: Date
+  confirmedAt?: Date
+  supplierOrderNumber?: string
+  note?: string
+}
+
 export interface BotOrderDoc extends Document {
   orderNumber: string
   waId: string
@@ -36,8 +51,21 @@ export interface BotOrderDoc extends Document {
   status: 'pending' | 'delivered' | 'cancelled'
   paid: boolean
   editHistory: BotOrderEdit[]
+  supplier?: BotOrderSupplier
   createdAt: Date
 }
+
+const SupplierSchema = new Schema<BotOrderSupplier>(
+  {
+    status: { type: String, enum: ['queued', 'sent', 'confirmed', 'review'], required: true },
+    queuedAt: { type: Date },
+    sentAt: { type: Date },
+    confirmedAt: { type: Date },
+    supplierOrderNumber: { type: String },
+    note: { type: String },
+  },
+  { _id: false }
+)
 
 const BotOrderSchema = new Schema<BotOrderDoc>(
   {
@@ -91,6 +119,7 @@ const BotOrderSchema = new Schema<BotOrderDoc>(
       ],
       default: [],
     },
+    supplier: { type: SupplierSchema, default: undefined },
   },
   { timestamps: true }
 )

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/mongodb'
 import { BotOrder } from '@/lib/models/BotOrder'
 import { buildSheetPayload, sendToSheet } from '@/lib/sheet-payload'
+import { notifySupplier } from '@/lib/supplier-dispatch'
 import { cookies } from 'next/headers'
 
 export async function GET() {
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
     city,
     notes,
   }, { action: 'create', vend: agentName }))
+  notifySupplier(orderNumber)
 
   return NextResponse.json({ success: true, orderNumber }, { status: 201 })
   } catch (err) {

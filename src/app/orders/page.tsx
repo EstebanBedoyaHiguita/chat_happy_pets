@@ -29,7 +29,28 @@ interface BotOrder {
   }
   status: OrderStatus
   paid: boolean
+  supplier?: {
+    status: SupplierStatus
+    supplierOrderNumber?: string
+    note?: string
+  }
   createdAt: string
+}
+
+type SupplierStatus = 'queued' | 'sent' | 'confirmed' | 'review'
+
+const SUPPLIER_LABELS: Record<SupplierStatus, string> = {
+  queued: 'Proveedor: en cola',
+  sent: 'Proveedor: enviado',
+  confirmed: 'Proveedor: confirmado',
+  review: 'Proveedor: revisar',
+}
+
+const SUPPLIER_COLORS: Record<SupplierStatus, string> = {
+  queued: 'bg-gray-700 text-gray-300 border-gray-600',
+  sent: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  confirmed: 'bg-green-500/20 text-green-300 border-green-500/30',
+  review: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
 }
 
 interface ManualItem {
@@ -250,6 +271,16 @@ export default function OrdersPage() {
                         <span>Pagado</span>
                       </button>
 
+                      {order.supplier && (
+                        <span
+                          title={order.supplier.note || undefined}
+                          className={`text-xs font-semibold px-3 py-1.5 rounded-lg border ${SUPPLIER_COLORS[order.supplier.status]}`}
+                        >
+                          {SUPPLIER_LABELS[order.supplier.status]}
+                          {order.supplier.supplierOrderNumber ? ` #${order.supplier.supplierOrderNumber}` : ''}
+                        </span>
+                      )}
+
                       {/* Status dropdown */}
                       <select
                         value={order.status}
@@ -275,6 +306,11 @@ export default function OrdersPage() {
                   {/* Expanded detail */}
                   {expanded === order._id && (
                     <div className="border-t border-gray-700 p-4 space-y-4">
+                      {order.supplier?.status === 'review' && order.supplier.note && (
+                        <div className="text-sm text-orange-300 bg-orange-500/10 border border-orange-500/30 rounded-lg px-3 py-2">
+                          {order.supplier.note}. La conversación está en Chats → Proveedor · pedidos.
+                        </div>
+                      )}
                       {/* Items */}
                       <div>
                         <div className="text-gray-400 text-xs uppercase tracking-wide mb-2">Productos</div>

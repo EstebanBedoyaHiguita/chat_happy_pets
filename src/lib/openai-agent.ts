@@ -410,6 +410,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           notes: (args.notes as string) ?? '',
         }, { action: 'create', vend: 'Bot' }))
 
+        const { notifySupplier } = await import('./supplier-dispatch')
+        notifySupplier(orderNumber)
+
         result = {
           success: true,
           orderNumber,
@@ -517,6 +520,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           city: '',
           notes: order.shippingAddress?.notes ?? '',
         }, { action: 'update' }))
+
+        const { flagSupplierChange } = await import('./supplier-dispatch')
+        await flagSupplierChange(orderNumber, 'El pedido se modificó')
 
         result = {
           success: true,

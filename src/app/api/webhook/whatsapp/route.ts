@@ -9,6 +9,7 @@ import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendCha
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import { fetchAdNames } from '@/lib/meta-ads'
+import { handleSupplierMessage, isSupplierWaId } from '@/lib/supplier-dispatch'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
 import type { Document } from 'mongoose'
 
@@ -113,6 +114,14 @@ async function processMessage(parsed: {
   // Deduplicate
   const existing = await Message.findOne({ waMessageId: parsed.messageId })
   if (existing) return
+
+  // El agente de pedidos del proveedor escribe a este mismo número. Sara nunca le
+  // contesta: su respuesta la lee supplier-dispatch.ts, antes de crear Customer o
+  // extraer datos de mascota como si fuera un cliente.
+  if (parsed.channel === 'whatsapp' && isSupplierWaId(parsed.from)) {
+    await handleSupplierMessage(parsed)
+    return
+  }
 
   // Get or create room — key is channel:senderId to allow same person on multiple channels
   // En WhatsApp la clave es el teléfono cuando viene; si el usuario ocultó su número con
