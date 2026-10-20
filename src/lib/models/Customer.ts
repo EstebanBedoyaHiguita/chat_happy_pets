@@ -22,6 +22,9 @@ export interface ICustomer extends Document {
   adId?: string
   adTitle?: string
   adBody?: string
+  adName?: string
+  adsetName?: string
+  campaignName?: string
   ctwaClid?: string
   sourceUrl?: string
   createdAt: Date
@@ -51,6 +54,9 @@ const CustomerSchema = new Schema<ICustomer>(
     adId: { type: String },
     adTitle: { type: String },
     adBody: { type: String },
+    adName: { type: String },
+    adsetName: { type: String },
+    campaignName: { type: String },
     ctwaClid: { type: String },
     sourceUrl: { type: String },
   },

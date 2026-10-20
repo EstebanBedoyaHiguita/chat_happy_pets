@@ -8,6 +8,7 @@ import { AgentConfig } from '@/lib/models/AgentConfig'
 import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, splitAroundImages, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
+import { fetchAdNames } from '@/lib/meta-ads'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
 import type { Document } from 'mongoose'
 
@@ -120,6 +121,9 @@ async function processMessage(parsed: {
   let room = await Room.findOne({ waId: roomKey })
   // Conversación abierta antes con teléfono y que ahora llega solo con BSUID (o al revés)
   if (!room && parsed.userId) room = await Room.findOne({ waUserId: parsed.userId })
+  // El webhook solo trae el ID del anuncio y su texto; el nombre con el que se
+  // creó en el administrador de anuncios se consulta aparte (ver meta-ads.ts).
+  const adNames = parsed.referral?.sourceId ? await fetchAdNames(parsed.referral.sourceId) : null
   const adFields = parsed.referral ? {
     adSource: parsed.referral.sourceType ?? 'ad',
     adId: parsed.referral.sourceId,
@@ -127,6 +131,7 @@ async function processMessage(parsed: {
     adBody: parsed.referral.body,
     ctwaClid: parsed.referral.ctwaClid,
     sourceUrl: parsed.referral.sourceUrl,
+    ...adNames,
   } : { adSource: 'Organic' }
 
   if (!room) {

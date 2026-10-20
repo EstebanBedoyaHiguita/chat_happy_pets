@@ -42,6 +42,9 @@ export interface IRoom {
   adId?: string
   adTitle?: string
   adBody?: string
+  adName?: string
+  adsetName?: string
+  campaignName?: string
   ctwaClid?: string
   sourceUrl?: string
   createdAt: string

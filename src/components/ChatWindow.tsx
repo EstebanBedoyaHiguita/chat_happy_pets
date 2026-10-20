@@ -378,8 +378,11 @@ export default function ChatWindow({ conversation, onStatusChange }: Props) {
                 <div className="px-3 py-2.5 flex flex-col gap-2 bg-gray-900">
                   {[
                     { label: 'Fuente', value: conversation.adSource },
-                    { label: 'Anuncio', value: conversation.adTitle },
-                    { label: 'Descripción', value: conversation.adBody },
+                    { label: 'Campaña', value: conversation.campaignName },
+                    { label: 'Conjunto de anuncios', value: conversation.adsetName },
+                    // Nombre del anuncio en el administrador de Meta. Si aún no se pudo
+                    // consultar, se cae al título que sí manda el webhook.
+                    { label: 'Anuncio', value: conversation.adName ?? conversation.adTitle },
                     { label: 'Ad ID', value: conversation.adId },
                     { label: 'CTWA Click ID', value: conversation.ctwaClid },
                   ].filter(({ value }) => !!value).map(({ label, value }) => (
