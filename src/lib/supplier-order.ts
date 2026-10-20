@@ -9,7 +9,7 @@
 
 /**
  * Texto de la plantilla tal como se registra en Meta (/settings/templates, categoría
- * Utilidad, nombre `pedido_proveedor`). El NIT y la forma de pago van fijos; el orden
+ * Utilidad, nombre `pedidos_fiel`). El NIT y la forma de pago van fijos; el orden
  * de las variables es el de supplierTemplateParams().
  */
 export const SUPPLIER_TEMPLATE_BODY = `Hola, mi NIT es 1128455175 y quiero hacer un pedido.

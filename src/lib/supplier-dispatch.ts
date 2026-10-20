@@ -29,7 +29,7 @@ import {
  */
 
 const SENT_TIMEOUT_MS = 2 * 60 * 60 * 1000
-const TEMPLATE_NAME = process.env.SUPPLIER_TEMPLATE_NAME || 'pedido_proveedor'
+const TEMPLATE_NAME = process.env.SUPPLIER_TEMPLATE_NAME || 'pedidos_fiel'
 const TEMPLATE_LANG = process.env.SUPPLIER_TEMPLATE_LANG || 'es'
 
 /** Número del agente del proveedor en formato waId (57XXXXXXXXXX). Vacío = apagado. */
