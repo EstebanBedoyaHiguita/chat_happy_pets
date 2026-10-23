@@ -23,7 +23,7 @@ Ciudad: {{6}}
 Productos y cantidades: {{7}}
 Forma de pago: Transferencia bancaria`
 
-/** Va siempre en los apellidos: así el proveedor sabe que el pedido es de Happy Pets. */
+/** Va siempre delante del nombre del cliente: así el proveedor sabe que el pedido es de Happy Pets. */
 export const ETIQUETA_HAPPY_PETS = 'Esteban Bedoya'
 
 /** Lo que confirma el pedido cuando el resumen del proveedor cuadra. */
@@ -69,9 +69,9 @@ const capitalizar = (w: string) => w.charAt(0).toUpperCase() + w.slice(1)
 
 /**
  * Parte el nombre del cliente en nombres y apellidos. Con 4 palabras o más, las dos
- * primeras son nombres; con menos, solo la primera. Los apellidos llevan siempre la
- * etiqueta de Happy Pets: "Castañeda - Esteban Bedoya", o solo la etiqueta si el
- * cliente no dio apellido.
+ * primeras son nombres; con menos, solo la primera. Los nombres llevan siempre la
+ * etiqueta de Happy Pets ADELANTE: "Esteban Bedoya_Nora". Sin apellido va "-":
+ * Meta no acepta variables vacías en la plantilla.
  */
 export function splitCustomerName(fullName: string): { nombres: string; apellidos: string } {
   // Sin emojis ni signos: "Tavo🙌🏻" → "Tavo", "Esteban.bedoya_H" → "Esteban bedoya H"
@@ -84,8 +84,8 @@ export function splitCustomerName(fullName: string): { nombres: string; apellido
   const nombres = palabras.slice(0, corte).join(' ')
   const apellidos = palabras.slice(corte).join(' ')
   return {
-    nombres: nombres || 'Cliente',
-    apellidos: apellidos ? `${apellidos} - ${ETIQUETA_HAPPY_PETS}` : ETIQUETA_HAPPY_PETS,
+    nombres: nombres ? `${ETIQUETA_HAPPY_PETS}_${nombres}` : ETIQUETA_HAPPY_PETS,
+    apellidos: apellidos || '-',
   }
 }
 
