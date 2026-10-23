@@ -373,7 +373,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           if (addressWithCity) contactUpdate.address = addressWithCity
           if (customerPhone) contactUpdate.phone = customerPhone
           await Room.updateOne({ waId }, { $set: contactUpdate })
-          await Customer.findOneAndUpdate({ waId }, { $set: contactUpdate }, { upsert: true, new: true, setDefaultsOnInsert: true })
+          await Customer.findOneAndUpdate({ waId }, { $set: contactUpdate }, { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true })
         }
 
         const { BotOrder } = await import('./models/BotOrder')
@@ -557,7 +557,7 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
             await Customer.findOneAndUpdate(
               { waId },
               { $set: update },
-              { upsert: true, new: true, setDefaultsOnInsert: true }
+              { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
             )
           }
         }

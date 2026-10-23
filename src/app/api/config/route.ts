@@ -21,7 +21,7 @@ export async function PUT(req: NextRequest) {
   const config = await AgentConfig.findOneAndUpdate(
     {},
     { systemPrompt, aiModel, temperature },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   ).lean()
 
   return NextResponse.json(config)

@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
   await AppSetting.findOneAndUpdate(
     { key: INSTAGRAM_TOKEN_KEY },
     { $set: { value: data.access_token, expiresAt: newExpiresAt } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   )
 
   console.log('[Instagram] Token renovado, vence el', newExpiresAt.toISOString())

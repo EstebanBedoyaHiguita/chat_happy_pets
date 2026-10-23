@@ -63,7 +63,7 @@ async function ensureSupplierRoom() {
       $setOnInsert: { waId, channel: 'whatsapp', name: 'Proveedor · pedidos', phone: waId },
       $set: { status: 'human' },
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   )
 }
 
@@ -110,7 +110,7 @@ async function dispatchNext(): Promise<void> {
   const order = await BotOrder.findOneAndUpdate(
     { 'supplier.status': 'queued', status: { $ne: 'cancelled' } },
     { $set: { 'supplier.status': 'sent', 'supplier.sentAt': new Date() } },
-    { sort: { createdAt: 1 }, new: true }
+    { sort: { createdAt: 1 }, returnDocument: 'after' }
   )
   if (!order) return
 

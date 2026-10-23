@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   const config = await AgentConfig.findOneAndUpdate(
     {},
     { $push: { transferRules: rule } },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   )
 
   return NextResponse.json(config.transferRules)
@@ -50,7 +50,7 @@ export async function DELETE(req: NextRequest) {
   const config = await AgentConfig.findOneAndUpdate(
     {},
     { $pull: { transferRules: { id } } },
-    { new: true }
+    { returnDocument: 'after' }
   )
 
   return NextResponse.json(config?.transferRules ?? [])

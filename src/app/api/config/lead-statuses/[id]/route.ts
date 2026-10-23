@@ -13,7 +13,7 @@ export async function PUT(
   if (name !== undefined) update.name = name.trim()
   if (color !== undefined) update.color = color
   if (active !== undefined) update.active = active
-  const updated = await LeadStatus.findByIdAndUpdate(id, { $set: update }, { new: true })
+  const updated = await LeadStatus.findByIdAndUpdate(id, { $set: update }, { returnDocument: 'after' })
   if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(updated)
 }

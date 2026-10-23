@@ -12,7 +12,7 @@ export async function PUT(
   const reason = await CloseReason.findByIdAndUpdate(
     id,
     { ...(name !== undefined ? { name: name.trim() } : {}), ...(active !== undefined ? { active } : {}) },
-    { new: true }
+    { returnDocument: 'after' }
   )
   if (!reason) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(reason)

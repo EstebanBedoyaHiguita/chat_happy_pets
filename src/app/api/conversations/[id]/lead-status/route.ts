@@ -15,7 +15,7 @@ export async function POST(
     ? { leadStatusId: statusId, leadStatusName: statusName, leadStatusColor: statusColor }
     : { $unset: { leadStatusId: '', leadStatusName: '', leadStatusColor: '' } }
 
-  const room = await Room.findByIdAndUpdate(id, statusId ? { $set: update } : update, { new: true })
+  const room = await Room.findByIdAndUpdate(id, statusId ? { $set: update } : update, { returnDocument: 'after' })
   if (!room) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // Sync to customer

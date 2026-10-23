@@ -48,7 +48,7 @@ async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
     await Customer.findOneAndUpdate(
       { waId: room.waId },
       { $set: update },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     )
     Object.assign(room, update)
   }
@@ -164,7 +164,7 @@ async function processMessage(parsed: {
     await Customer.findOneAndUpdate(
       { waId: roomKey },
       { $setOnInsert: { name: parsed.name, phone: parsed.phone ?? '', ...adFields } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     )
   } else {
     room.lastMessage = parsed.text

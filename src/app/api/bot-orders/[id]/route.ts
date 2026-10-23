@@ -20,7 +20,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     update.paid = Boolean(body.paid)
   }
 
-  let order = await BotOrder.findByIdAndUpdate(id, update, { new: true })
+  let order = await BotOrder.findByIdAndUpdate(id, update, { returnDocument: 'after' })
   if (!order) return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 })
   if (update.status === 'cancelled') {
     await flagSupplierChange(order.orderNumber, 'El pedido se canceló')
