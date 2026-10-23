@@ -17,7 +17,10 @@ import {
  * Avisa cada pedido al agente de WhatsApp del proveedor y confirma su resumen.
  *
  * Reglas que viven aquí y no en un prompt:
- * - El envío lo decide el código: sale con la plantilla en cuanto se crea el pedido.
+ * - El envío lo decide el código, en cuanto se crea el pedido. Su bot NO lee plantillas
+ *   (le llegan como `unsupported`, error 131051, y responde "no podemos procesar tu
+ *   mensaje"): con la ventana de 24h abierta va como texto; si está cerrada va la
+ *   plantilla, y su respuesta abre la ventana para reenviarlo como texto.
  * - De a UN pedido: su resumen trae su propio número, no el nuestro, así que con dos
  *   en vuelo no se sabría cuál está confirmando. El siguiente sale al confirmarse el
  *   anterior (o si el anterior lleva SENT_TIMEOUT_MS sin respuesta).
@@ -29,6 +32,8 @@ import {
  */
 
 const SENT_TIMEOUT_MS = 2 * 60 * 60 * 1000
+// Meta da 24h desde su último mensaje; una hora de margen por si el envío se demora.
+const WINDOW_MS = 23 * 60 * 60 * 1000
 const TEMPLATE_NAME = process.env.SUPPLIER_TEMPLATE_NAME || 'pedidos_fiel'
 const TEMPLATE_LANG = process.env.SUPPLIER_TEMPLATE_LANG || 'es'
 
@@ -80,6 +85,19 @@ async function markReview(orderId: unknown, note: string) {
   await BotOrder.updateOne({ _id: orderId }, { $set: { 'supplier.status': 'review', 'supplier.note': note } })
 }
 
+/**
+ * El pedido como mensaje de texto. Solo se puede dentro de la ventana de 24h que abre
+ * un mensaje del proveedor; marca textSent para que la respuesta no lo reenvíe otra vez.
+ */
+async function sendOrderAsText(orderId: unknown, params: string[]): Promise<boolean> {
+  const text = renderSupplierMessage(params)
+  const waMessageId = await sendWhatsAppMessage(supplierWaId(), text)
+  if (!waMessageId) return false
+  await BotOrder.updateOne({ _id: orderId }, { $set: { 'supplier.textSent': true } })
+  await logOutbound(text, waMessageId)
+  return true
+}
+
 /** Envía el siguiente pedido en cola, si no hay otro esperando respuesta del proveedor. */
 async function dispatchNext(): Promise<void> {
   const enVuelo = await BotOrder.findOne({ 'supplier.status': 'sent' }).sort({ 'supplier.sentAt': 1 })
@@ -98,6 +116,16 @@ async function dispatchNext(): Promise<void> {
 
   // Se arma al enviar, no al encolar: si el pedido se editó mientras esperaba, sale el actual.
   const params = supplierTemplateParams(order)
+
+  // Con la ventana de 24h abierta (su bot siempre cierra con "quedo disponible") se le
+  // escribe en texto, que es lo único que su bot entiende.
+  const room = await Room.findOne({ waId: supplierWaId() }, { lastInboundAt: 1 }).lean<{ lastInboundAt?: Date }>()
+  const ventanaAbierta = !!room?.lastInboundAt && Date.now() - room.lastInboundAt.getTime() < WINDOW_MS
+  if (ventanaAbierta && (await sendOrderAsText(order._id, params))) {
+    console.log('[supplier] enviado como texto', order.orderNumber)
+    return
+  }
+
   const { messageId, error } = await sendWhatsAppTemplate(supplierWaId(), TEMPLATE_NAME, TEMPLATE_LANG, [
     { type: 'body', parameters: params.map((text) => ({ type: 'text', text })) },
   ])
@@ -240,10 +268,26 @@ export async function handleSupplierMessage(msg: { text: string; messageId: stri
   const lectura = await readSupplierMessage(msg.text)
   console.log('[supplier] lectura', order.orderNumber, JSON.stringify(lectura))
 
-  if (lectura.tipo === 'pregunta') {
-    return markReview(order._id, `El proveedor preguntó: "${msg.text.slice(0, 200)}"`)
+  if (lectura.tipo !== 'resumen') {
+    // Su bot no lee plantillas: a la plantilla responde "no podemos procesar tu mensaje",
+    // y esa respuesta abre la ventana. Es justo lo que se hacía a mano: reenviar el
+    // pedido como texto. Una sola vez, reclamada para que dos webhooks no lo dupliquen.
+    const reenviar = await BotOrder.findOneAndUpdate(
+      { _id: order._id, 'supplier.status': 'sent', 'supplier.textSent': { $ne: true } },
+      { $set: { 'supplier.textSent': true } }
+    )
+    if (reenviar) {
+      if (await sendOrderAsText(order._id, supplierTemplateParams(order))) {
+        console.log('[supplier] reenviado como texto', order.orderNumber)
+        return
+      }
+      return markReview(order._id, 'Su bot no leyó la plantilla y no se pudo reenviar el pedido como texto')
+    }
+    if (lectura.tipo === 'pregunta') {
+      return markReview(order._id, `El proveedor preguntó: "${msg.text.slice(0, 200)}"`)
+    }
+    return
   }
-  if (lectura.tipo !== 'resumen') return
 
   const { ok, diferencias } = compareWithSupplier(order.items, lectura.productos)
   if (!ok) {

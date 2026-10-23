@@ -31,6 +31,8 @@ export interface BotOrderSupplier {
   confirmedAt?: Date
   supplierOrderNumber?: string
   note?: string
+  /** Ya se le mandó como texto: su bot no lee plantillas (ver supplier-dispatch.ts). */
+  textSent?: boolean
 }
 
 export interface BotOrderDoc extends Document {
@@ -63,6 +65,7 @@ const SupplierSchema = new Schema<BotOrderSupplier>(
     confirmedAt: { type: Date },
     supplierOrderNumber: { type: String },
     note: { type: String },
+    textSent: { type: Boolean },
   },
   { _id: false }
 )

@@ -108,8 +108,24 @@ export function addressWithoutCity(address: string, city: string): string {
   return partes.join(', ')
 }
 
+/**
+ * Un mismo producto en dos líneas se suma en una. El 2026-10-22 salió
+ * "2 Barf Pollo y Verduras, 1 Galleta…, 2 Barf Pollo y Verduras" y su bot registró 2.
+ */
+export function mergeSupplierItems(items: { name: string; quantity: number }[]): { name: string; quantity: number }[] {
+  const porNombre = new Map<string, { name: string; quantity: number }>()
+  for (const i of items) {
+    const name = supplierProductName(i.name)
+    const key = normalizar(name)
+    const prev = porNombre.get(key)
+    if (prev) prev.quantity += i.quantity
+    else porNombre.set(key, { name, quantity: i.quantity })
+  }
+  return [...porNombre.values()]
+}
+
 export function supplierProductsLine(items: { name: string; quantity: number }[]): string {
-  return items.map((i) => `${i.quantity} ${supplierProductName(i.name)}`).join(', ')
+  return mergeSupplierItems(items).map((i) => `${i.quantity} ${i.name}`).join(', ')
 }
 
 /** Las 7 variables de la plantilla, en orden. El barrio va con la ciudad: no lo pedimos. */
@@ -132,11 +148,20 @@ export function renderSupplierMessage(params: string[]): string {
   return SUPPLIER_TEMPLATE_BODY.replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] ?? '')
 }
 
-// "barf", "dieta" y los conectores no distinguen un sabor de otro
-const NO_DISTINGUE = new Set(['barf', 'dieta', 'de', 'y', 'con', 'el', 'la', 'del', 'x'])
+// "barf", "dieta", los conectores y la presentación no distinguen un producto de otro
+const NO_DISTINGUE = new Set(['barf', 'dieta', 'de', 'y', 'con', 'el', 'la', 'del', 'x', 'sabor', 'bolsa', 'gr', 'g'])
+const GRAMAJE = /^\d+(g|gr|grs|gramos)?$/
 
+/**
+ * Palabras que identifican el producto, en singular: ellos escriben "Galletas sabor
+ * Hamburguesas" donde nosotros "Galleta Hamburguesas 150gr" (pedido 48230).
+ * "res" no pierde la s: solo se recorta en palabras de más de 3 letras.
+ */
 const distintivas = (name: string) =>
-  normalizar(name).split(' ').filter((w) => w && !NO_DISTINGUE.has(w))
+  normalizar(name)
+    .split(' ')
+    .filter((w) => w && !NO_DISTINGUE.has(w) && !GRAMAJE.test(w))
+    .map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w))
 
 // Nuestros nombres solo dicen "Gato" en los de gato; los de perro no lo dicen. Los
 // suyos sí ("- Perro"). Sin esto, Pollo y Verduras de perro y el de gato empatarían.
@@ -162,8 +187,8 @@ export function compareWithSupplier(
   const diferencias: string[] = []
   const usadas = new Set<number>()
 
-  for (const item of ours) {
-    const enviado = supplierProductName(item.name)
+  for (const item of mergeSupplierItems(ours)) {
+    const enviado = item.name
     const claves = distintivas(enviado)
     const candidatas = theirs
       .map((l, idx) => ({ l, idx, suyas: distintivas(l.producto) }))
