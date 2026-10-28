@@ -10,7 +10,7 @@ import {
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
-import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, stripCardEcho } from './product-display'
+import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, resolveSpecies, stripCardEcho } from './product-display'
 import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
 import { getDeliveryDate, withDeliveryMessage } from './delivery'
 import { extractTransferSignal, toWhatsAppText } from './outgoing-text'
@@ -761,7 +761,7 @@ MOMENTO 1 — Cliente pregunta por BARF, precios, dietas o pide información (in
 1. PRIMERO preséntate: "¡Hola [nombre]! Soy Sara, asesora de Happy Pets Family 🐾"
 2. Si todavía no sabes si tiene perro o gato: dale el rango de precios y pregúntaselo en el MISMO mensaje. Nunca le niegues el precio por no saberlo.
 3. Cuando ya sepas el tipo: muestra con imagen los sabores de la vitrina y menciona los demás solo en texto, preguntándole si quiere ver alguno.
-⛔ NUNCA muestres sabores de gato a quien tiene perro, ni al revés.
+⛔ NUNCA muestres sabores de gato a quien solo tiene perro, ni al revés. Si tiene los dos (o habla de los dos), el bloque "PRODUCTOS PARA ESTE TURNO" te trae las opciones de ambos agrupadas "Para perro" / "Para gato": muéstralas así y nunca asumas la especie.
 
 MOMENTO 2 — Cliente menciona o elige un sabor específico (dijo "el de pollo", "la de pollo", "cordero", "salmón", "ese", "sí por favor" + nombre de sabor, "de pescado y conejo", etc.):
 ⛔ NO listes todos los productos de nuevo.
@@ -1000,13 +1000,20 @@ Si NO hay que transferir, no incluyas ese JSON.`
   const collectedProducts: AgentProduct[] = []
   try {
     const catalog = await getCatalog()
-    const barf = barfFor(catalog, roomData.petType)
+    // La especie se decide en cada turno (mensaje → lo último que dijo → mascotas de la
+    // sala), no solo con room.petType: ver resolveSpecies.
+    const species = resolveSpecies(
+      userMessage,
+      conversationHistory.filter((m) => m.direction === 'inbound').map((m) => m.content),
+      [roomData.petType, roomData.pet2Type, roomData.pet3Type]
+    )
+    const barf = barfFor(catalog, species)
     for (const p of catalog) {
       collectedProducts.push({ ...p, image: p.imageUrl })
       if (p.imageUrl) collectedImageUrls.push(p.imageUrl)
     }
     const decision = decideDisplay(userMessage, barf, catalog)
-    const instruction = buildDisplayInstruction(decision, barf, Boolean(roomData.petType))
+    const instruction = buildDisplayInstruction(decision, barf, species)
     if (instruction) messages.push({ role: 'system', content: instruction })
 
     // El cliente cerró la lista de sabores y todavía no dijo cuántos quiere. El prompt

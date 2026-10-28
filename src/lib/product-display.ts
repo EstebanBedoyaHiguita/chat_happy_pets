@@ -103,10 +103,54 @@ async function fetchCatalog(): Promise<CatalogProduct[]> {
   return products
 }
 
-/** Dietas BARF del tipo de mascota dado. Sin tipo conocido, las de perro. */
-export function barfFor(products: CatalogProduct[], petType?: string): CatalogProduct[] {
-  const target: PetType = normalize(petType ?? '').includes('gato') ? 'gato' : 'perro'
-  return products.filter((p) => isBarf(p) && petTypeOf(p) === target)
+/**
+ * Palabras con que el cliente nombra a cada especie, ya sin tildes. "can" no está:
+ * aparece en palabras normales y no hace falta.
+ */
+const SPECIES_WORDS: Record<PetType, RegExp> = {
+  perro: /\b(?:perr[oa]s?|perrit[oa]s?|perric[oa]s?|cachorr[oa]s?|cachorrit[oa]s?|canin[oa]s?)\b/,
+  gato: /\b(?:gat[oa]s?|gatit[oa]s?|gatic[oa]s?|michis?|michit[oa]s?|minin[oa]s?|felin[oa]s?)\b/,
+}
+
+/** Especies que nombra un texto: "tengo una gatica y un perro" → ['perro', 'gato']. */
+export function speciesIn(text: string | undefined): PetType[] {
+  const t = normalize(text ?? '')
+  return (['perro', 'gato'] as PetType[]).filter((s) => SPECIES_WORDS[s].test(t))
+}
+
+/** Cuántos mensajes del cliente hacia atrás se mira para saber de qué especie está hablando. */
+const SPECIES_LOOKBACK = 6
+
+/**
+ * De qué especie son los productos de ESTE turno.
+ *
+ * Antes salía solo de `room.petType`, que se llena una vez y no cambia: un cliente que
+ * preguntó "¿tienen para gato?" quedaba como Gato para siempre, y si después hablaba de
+ * su perro le seguían saliendo las dietas de gato (2026-10-26). Ahora, en este orden:
+ *  1. lo que dice este mensaje;
+ *  2. lo último que dijo el cliente sobre especies, en sus mensajes recientes;
+ *  3. las mascotas registradas en la sala, todas — perro y gato si tiene los dos.
+ * Vacío = no se sabe, y entonces no se muestran fotos sino el rango de precios.
+ */
+export function resolveSpecies(
+  message: string,
+  recentInbound: string[],
+  registered: (string | undefined)[]
+): PetType[] {
+  const now = speciesIn(message)
+  if (now.length > 0) return now
+  for (const text of recentInbound.slice(-SPECIES_LOOKBACK).reverse()) {
+    const said = speciesIn(text)
+    if (said.length > 0) return said
+  }
+  const pets = new Set(registered.flatMap((r) => speciesIn(r)))
+  return (['perro', 'gato'] as PetType[]).filter((s) => pets.has(s))
+}
+
+/** Dietas BARF de las especies dadas. Sin especie conocida, las de perro. */
+export function barfFor(products: CatalogProduct[], species: PetType[]): CatalogProduct[] {
+  const target: PetType[] = species.length > 0 ? species : ['perro']
+  return products.filter((p) => isBarf(p) && target.includes(petTypeOf(p)))
 }
 
 /** Los SHOWCASE_SIZE sabores más baratos: los que van con imagen en la vitrina. */
@@ -238,7 +282,10 @@ export function decideDisplay(
     }
   }
 
-  return { mode: 'seleccion', selected: specific, ambiguous: false }
+  // Cliente con perro y gato que dice "pollo": existe Dieta Barf Pollo y Gato De Pollo.
+  // Se muestran los dos y elige él; nunca se asume una especie.
+  const especies = new Set(specific.map(petTypeOf))
+  return { mode: 'seleccion', selected: specific, ambiguous: especies.size > 1 }
 }
 
 const cop = (n: number) => `$${n.toLocaleString('es-CO')} COP`
@@ -260,10 +307,40 @@ const CARD_RULE =
  * Lleva precios e imágenes del catálogo, así que el modelo no tiene que llamar
  * get_products para tener datos correctos ni puede inventarse un precio.
  */
+/**
+ * Con dos especies en juego los productos van agrupados "Para perro:" / "Para gato:".
+ * El nombre del catálogo no dice "perro" ("Dieta Barf Pollo"), así que sin el grupo el
+ * modelo no tiene cómo saber de cuál especie es cada uno.
+ */
+function porEspecie(
+  products: CatalogProduct[],
+  species: PetType[],
+  render: (p: CatalogProduct) => string,
+  sep: string
+): string {
+  if (species.length < 2) return products.map(render).join(sep)
+  return species
+    .map((s) => {
+      const suyos = products.filter((p) => petTypeOf(p) === s)
+      return suyos.length ? `Para ${s}:\n${suyos.map(render).join(sep)}` : ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/**
+ * La vitrina con dos especies: los 2 más baratos de cada una, para no pasar de 4 fotos.
+ * Con una sola especie, los SHOWCASE_SIZE más baratos de siempre.
+ */
+export function showcaseFor(barf: CatalogProduct[], species: PetType[]): CatalogProduct[] {
+  if (species.length < 2) return showcase(barf)
+  return species.flatMap((s) => showcase(barf.filter((p) => petTypeOf(p) === s)).slice(0, 2))
+}
+
 export function buildDisplayInstruction(
   decision: DisplayDecision,
   barf: CatalogProduct[],
-  petTypeKnown: boolean
+  species: PetType[]
 ): string {
   if (barf.length === 0) return ''
   // Turno que no va de productos: sin bloque. Nunca dice "no envíes la URL" — solo
@@ -274,20 +351,25 @@ export function buildDisplayInstruction(
   const rango = `${cop(Math.min(...prices))} a ${cop(Math.max(...prices))}`
 
   if (decision.mode === 'seleccion') {
-    const header = decision.ambiguous
-      ? 'El cliente nombró un sabor de forma imprecisa y hay más de una opción posible. ' +
-        'Muéstrale ESTAS y pregúntale cuál quiere. No elijas tú por él:'
-      : 'El cliente nombró estos sabores. Muéstrale SOLO estos y pregúntale si quiere agregar ' +
-        'otro sabor. ⛔ NO le pidas cantidades todavía: las cantidades se preguntan UNA sola vez, ' +
-        'cuando ya tenga cerrada la lista de sabores:'
+    const selected = decision.selected.slice(0, 4)
+    const variasEspecies = new Set(selected.map(petTypeOf)).size > 1
+    const header = variasEspecies
+      ? 'Ese sabor existe para perro y para gato, y no sabes para cuál lo quiere. ' +
+        'Muéstrale los dos y pregúntale para cuál es. No elijas tú por él:'
+      : decision.ambiguous
+        ? 'El cliente nombró un sabor de forma imprecisa y hay más de una opción posible. ' +
+          'Muéstrale ESTAS y pregúntale cuál quiere. No elijas tú por él:'
+        : 'El cliente nombró estos sabores. Muéstrale SOLO estos y pregúntale si quiere agregar ' +
+          'otro sabor. ⛔ NO le pidas cantidades todavía: las cantidades se preguntan UNA sola vez, ' +
+          'cuando ya tenga cerrada la lista de sabores:'
     return (
       `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n${header}\n` +
-      decision.selected.slice(0, 4).map(line).join('\n\n') +
+      porEspecie(selected, variasEspecies ? species : [], line, '\n\n') +
       `\n\n${CARD_RULE}No listes otros sabores en este mensaje.`
     )
   }
 
-  if (!petTypeKnown) {
+  if (species.length === 0) {
     return (
       `PRODUCTOS PARA ESTE TURNO:\nTodavía no sabes si tiene perro o gato, así que NO muestres productos ni imágenes. ` +
       `Responde con el rango real de precios de las dietas BARF (${rango}) y en el mismo mensaje pregúntale ` +
@@ -295,18 +377,23 @@ export function buildDisplayInstruction(
     )
   }
 
-  const vitrina = showcase(barf)
+  const vitrina = showcaseFor(barf, species)
   const resto = barf.filter((p) => !vitrina.includes(p))
   const restoTexto = resto.length
     ? '\nEn tu texto sí menciona estos otros sabores, SOLO por nombre y precio (sin URL, sin foto), ' +
       'y pregúntale si quiere ver alguno:\n' +
-      resto.map((p) => `${p.name} — ${cop(p.price)}`).join('\n')
+      porEspecie(resto, species, (p) => `${p.name} — ${cop(p.price)}`, '\n')
     : ''
+  const intro =
+    species.length > 1
+      ? `El cliente tiene perro y gato, o habló de los dos: muéstrale las opciones de ambos, ` +
+        `diciendo cuáles son para perro y cuáles para gato. Estos ${vitrina.length} van con foto:\n`
+      : `El cliente está conociendo el catálogo. Estos ${vitrina.length} sabores van con foto:\n`
 
   return (
     `PRODUCTOS PARA ESTE TURNO — usa estos precios e imágenes EXACTOS:\n` +
-    `El cliente está conociendo el catálogo. Estos ${vitrina.length} sabores van con foto:\n` +
-    vitrina.map(line).join('\n\n') +
+    intro +
+    porEspecie(vitrina, species, line, '\n\n') +
     `\n\n${CARD_RULE}` +
     restoTexto
   )

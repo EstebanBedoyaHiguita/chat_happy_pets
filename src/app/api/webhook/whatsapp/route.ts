@@ -10,6 +10,8 @@ import { buildOutgoingTexts } from '@/lib/outgoing-text'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import { fetchAdNames } from '@/lib/meta-ads'
+import { speciesIn } from '@/lib/product-display'
+import { normalize } from '@/lib/order-pricing'
 import { handleSupplierMessage, isSupplierWaId } from '@/lib/supplier-dispatch'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
 import type { Document } from 'mongoose'
@@ -22,9 +24,19 @@ export const maxDuration = 60
 async function autoExtractAndSave(room: RoomDoc & Document, text: string) {
   const update: Record<string, string> = {}
 
-  if (!room.petType) {
-    if (/\b(perro|perrita|cachorro|can)\b/i.test(text)) update.petType = 'Perro'
-    else if (/\b(gato|gatita|gatito|felino)\b/i.test(text)) update.petType = 'Gato'
+  // La especie de la mascota. La que se muestra en cada turno ya no depende solo de esto
+  // (ver resolveSpecies), pero sí el saludo y los datos que Sara cree conocer.
+  const ESPECIE = { perro: 'Perro', gato: 'Gato' } as const
+  const dichas = speciesIn(text)
+  if (!room.petType && dichas.length > 0) {
+    update.petType = ESPECIE[dichas[0]]
+    if (dichas[1] && !room.pet2Type) update.pet2Type = ESPECIE[dichas[1]]
+  } else if (room.petType && !room.pet2Type) {
+    // Segunda mascota de otra especie, solo si dice que la tiene ("también tengo una
+    // gata"): "¿y para gato tienen?" puede ser para otra persona.
+    const registrada = speciesIn(room.petType)
+    const otra = dichas.find((s) => !registrada.includes(s))
+    if (otra && /\b(tengo|tenemos|mis?|tambien)\b/.test(normalize(text))) update.pet2Type = ESPECIE[otra]
   }
 
   // Extract pet name: capitalized word(s) at start of message before "tiene", "pesa", "es" or a comma.
