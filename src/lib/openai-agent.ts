@@ -9,7 +9,7 @@ import {
   getShippingCost,
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
-import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
+import { diffItems, priceItems, pricingProblems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
 import { barfFor, buildDisplayInstruction, choosePhotos, decideDisplay, getCatalog, productFromQuote, resolveSpecies, speciesOfProduct, stripCardEcho, type CatalogProduct, type DisplayDecision, type PetType } from './product-display'
 import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
 import { getDeliveryDate, withDeliveryMessage } from './delivery'
@@ -235,6 +235,32 @@ async function findPendingOrder(waId?: string): Promise<EditableOrder | null> {
   return BotOrder.findOne({ waId, status: 'pending' }).sort({ createdAt: -1 }).lean()
 }
 
+/**
+ * La lista de precios para un pedido. Si el backend no respondió (arranque en frío de
+ * Render), se usa el catálogo en caché de product-display antes que cobrar sin precios.
+ */
+async function priceListFor(raw: unknown): Promise<Record<string, unknown>[]> {
+  const list = toProductList(raw)
+  if (list.length > 0) return list
+  try {
+    const cached = await getCatalog()
+    return cached.map((p) => ({ _id: p._id, name: p.name, price: p.price, images: p.imageUrl ? [p.imageUrl] : [] }))
+  } catch {
+    return []
+  }
+}
+
+/** Instrucción para el modelo cuando un pedido no se puede cobrar. null = se puede. */
+function pricingBlock(freshList: Record<string, unknown>[], requested: RequestedItem[]): string | null {
+  if (freshList.length === 0) {
+    return 'NO crees el pedido: no se pudo consultar el catálogo y no hay precios para cobrarlo. NO inventes precios. Dile al cliente: "Ya casi lo tenemos 😊 Un asesor del equipo te confirma el pedido en un momento 🐾" y agrega en la ÚLTIMA línea: {"transfer":true,"reason":"catálogo no disponible al crear el pedido"}'
+  }
+  const problems = pricingProblems(freshList, requested)
+  if (problems.length === 0) return null
+  const nombres = freshList.map((p) => p.name).filter(Boolean).join(', ')
+  return `NO puedes registrar el pedido todavía: ${problems.join('; ')}.\nProductos del catálogo: ${nombres}.\nUsa el nombre EXACTO del catálogo y la cantidad que dijo el cliente. Si no sabes la cantidad de algún producto, pregúntasela; nunca la inventes. Si pidió algo que no vendemos, díselo con amabilidad y ofrécele lo más parecido.`
+}
+
 async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}, pendingSteps: string[] = []): Promise<string> {
   console.log('[Tool call]', name, JSON.stringify(args))
   try {
@@ -346,6 +372,14 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           })
         }
 
+        // Hard block: sin precio real no hay pedido (ver pricingProblems).
+        const freshList = await priceListFor(freshProductsRaw.status === 'fulfilled' ? freshProductsRaw.value : null)
+        const bloqueoPrecio = pricingBlock(freshList, args.items as RequestedItem[])
+        if (bloqueoPrecio) {
+          console.error('[create_order] bloqueado por precios:', bloqueoPrecio.split('\n')[0])
+          return JSON.stringify({ status: 'error', instruction: bloqueoPrecio })
+        }
+
         const realCityId = (matchedCity?._id ?? args.cityId) as string
         let shipping = 10000
         try {
@@ -355,7 +389,6 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           console.error('[create_order] getShippingCost error:', e)
         }
 
-        const freshList = toProductList(freshProductsRaw.status === 'fulfilled' ? freshProductsRaw.value : null)
         const items = priceItems(freshList, args.items as RequestedItem[], 'create_order')
         const subtotal = sumSubtotal(items)
         const total = subtotal + shipping
@@ -489,7 +522,12 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
           })
         }
 
-        const freshList = toProductList(await getProducts())
+        const freshList = await priceListFor(await getProducts().catch(() => null))
+        const bloqueoPrecio = pricingBlock(freshList, requested)
+        if (bloqueoPrecio) {
+          console.error('[update_order] bloqueado por precios:', bloqueoPrecio.split('\n')[0])
+          return JSON.stringify({ status: 'error', instruction: bloqueoPrecio })
+        }
         const newItems = priceItems(freshList, requested, 'update_order')
         const previousItems = order.items.map((i: PricedItem) => ({
           name: i.name, price: i.price, quantity: i.quantity, lineTotal: i.lineTotal, image: i.image ?? '',

@@ -99,6 +99,25 @@ export function priceItems(freshList: Product[], requested: RequestedItem[], log
 
 export const sumSubtotal = (items: PricedItem[]) => items.reduce((sum, i) => sum + i.lineTotal, 0)
 
+/**
+ * Lo que impide cobrar un pedido, en palabras que el modelo pueda corregir. Vacío = se
+ * puede crear. Existe porque priceItems nunca falla: sin match deja precio 0, y sin
+ * cantidad asume 1. El 2026-10-02 el catálogo no respondió y se creó WA-1790961137969
+ * con 45 x Dieta Barf Pollo a $0 (subtotal $0).
+ */
+export function pricingProblems(freshList: Product[], requested: RequestedItem[]): string[] {
+  if (!requested || requested.length === 0) return ['el pedido no trae productos']
+  const problems: string[] = []
+  for (const item of requested) {
+    const found = matchProduct(freshList, item)
+    const qty = Number(item.quantity)
+    if (!found) problems.push(`"${item.productName}" no está en el catálogo`)
+    else if (!(Number(found.price) > 0)) problems.push(`"${found.name}" no tiene precio en el catálogo`)
+    if (!Number.isInteger(qty) || qty <= 0) problems.push(`falta la cantidad de "${item.productName}"`)
+  }
+  return problems
+}
+
 export interface ItemDiff {
   added: { name: string; quantity: number }[]
   removed: { name: string; quantity: number }[]
