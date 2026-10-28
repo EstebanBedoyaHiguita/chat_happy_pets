@@ -271,6 +271,10 @@ async function processMessage(parsed: {
     // Lo que el cliente escribió con la sala cerrada no es parte de esta conversación:
     // la ráfaga empieza en este mensaje.
     room.botAnsweredUntil = new Date(inbound.timestamp.getTime() - 1)
+    // Visita nueva: el bot no arrastra el historial ni el resumen de la anterior (pedidos
+    // y fechas viejas se mezclaban con los de hoy). Los datos del cliente siguen en la sala.
+    room.visitStartedAt = inbound.timestamp
+    room.contextSummary = ''
     await room.save()
   }
 
@@ -361,7 +365,10 @@ async function responderTurno(
 
   // El historial termina antes de la ráfaga: lo que el cliente acaba de escribir va una
   // sola vez, como su mensaje. Antes iba dos veces (en el historial y como mensaje).
-  const history = await Message.find({ roomId: room._id, timestamp: { $lt: rafaga[0].timestamp } })
+  const history = await Message.find({
+    roomId: room._id,
+    timestamp: { $lt: rafaga[0].timestamp, ...(room.visitStartedAt ? { $gte: room.visitStartedAt } : {}) },
+  })
     .sort({ timestamp: -1 })
     .limit(20)
     .then((msgs) => msgs.reverse())
@@ -477,9 +484,15 @@ async function responderTurno(
 
   await sendText(cola)
 
-  Message.countDocuments({ roomId: room._id }).then((count) => {
+  // El resumen es solo de la visita actual: con el de visitas anteriores el bot citaba
+  // pedidos y fechas viejas como si fueran de hoy.
+  const deEstaVisita = {
+    roomId: room._id,
+    ...(room.visitStartedAt ? { timestamp: { $gte: room.visitStartedAt } } : {}),
+  }
+  Message.countDocuments(deEstaVisita).then((count) => {
     if (count > 6) {
-      Message.find({ roomId: room._id })
+      Message.find(deEstaVisita)
         .sort({ timestamp: 1 })
         .then((allMsgs) => {
           const formatted = allMsgs.map((m) => ({

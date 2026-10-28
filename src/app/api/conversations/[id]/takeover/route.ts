@@ -84,7 +84,10 @@ async function resumeBot(roomId: string) {
 
 async function responder(room: RoomDoc, lastInbound: MessageDoc) {
   // El historial termina antes del mensaje que se responde, que va aparte: antes iba dos veces.
-  const history = await Message.find({ roomId: room._id, timestamp: { $lt: lastInbound.timestamp } })
+  const history = await Message.find({
+    roomId: room._id,
+    timestamp: { $lt: lastInbound.timestamp, ...(room.visitStartedAt ? { $gte: room.visitStartedAt } : {}) },
+  })
     .sort({ timestamp: -1 })
     .limit(20)
     .then((msgs) => msgs.reverse())

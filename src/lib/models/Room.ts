@@ -52,6 +52,8 @@ export interface RoomDoc extends Document {
   botLockUntil?: Date | null
   /** Hasta qué mensaje del cliente ya respondió el bot: lo posterior es la ráfaga pendiente. */
   botAnsweredUntil?: Date | null
+  /** Inicio de la visita actual: la sala se reabrió aquí. El bot no ve nada anterior. */
+  visitStartedAt?: Date | null
 }
 
 const RoomSchema = new Schema<RoomDoc>(
@@ -105,6 +107,7 @@ const RoomSchema = new Schema<RoomDoc>(
     lastInboundAt: { type: Date },
     botLockUntil: { type: Date, default: null },
     botAnsweredUntil: { type: Date, default: null },
+    visitStartedAt: { type: Date, default: null },
   },
   { timestamps: true }
 )
