@@ -5,9 +5,9 @@ import { Room } from '@/lib/models/Room'
 import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
-import { buildOutgoingTexts } from '@/lib/outgoing-text'
-import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
+import { transcribeAudio } from '@/lib/openai-agent'
+import { correrTurnoDelBot } from '@/lib/bot-turn'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import { fetchAdNames } from '@/lib/meta-ads'
 import { precalentarCatalogo, speciesIn } from '@/lib/product-display'
@@ -16,7 +16,6 @@ import { handleSupplierMessage, isSupplierWaId } from '@/lib/supplier-dispatch'
 import { esElUltimoDeLaRafaga, hayPendientes, soltarTurno, tomarRafaga, tomarTurno } from '@/lib/turn-lock'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
 import type { Document, Types } from 'mongoose'
-import type { ITransferRule } from '@/types'
 
 // El turno que crea un pedido encadena varias llamadas a OpenAI y al backend
 // (catalogo, ciudades, costo de envio). Con el default de Vercel la funcion se
@@ -339,11 +338,11 @@ async function processMessage(parsed: {
     return
   }
   try {
-    await responderTurno(room._id, inbound._id, parsed, replyTo, config, baseUrl)
+    await responderTurno(room._id, inbound._id, parsed, baseUrl)
     // Lo que el cliente escribió mientras este turno respondía, si su propio mensaje se
     // cansó de esperar el turno: se responde ya, si a la función le queda tiempo.
     if (Date.now() - inicio < 25_000 && (await hayPendientes(room._id))) {
-      await responderTurno(room._id, inbound._id, parsed, replyTo, config, baseUrl)
+      await responderTurno(room._id, inbound._id, parsed, baseUrl)
     }
   } finally {
     await soltarTurno(room._id)
@@ -352,30 +351,13 @@ async function processMessage(parsed: {
 
 type ParsedIncoming = Parameters<typeof processMessage>[0]
 
-async function responderTurno(
-  roomId: Types.ObjectId,
-  inboundId: Types.ObjectId,
-  parsed: ParsedIncoming,
-  replyTo: string,
-  config: { systemPrompt: string; transferRules: ITransferRule[]; aiModel: string; temperature: number },
-  baseUrl: string
-) {
+async function responderTurno(roomId: Types.ObjectId, inboundId: Types.ObjectId, parsed: ParsedIncoming, baseUrl: string) {
   // La sala se relee: mientras este mensaje esperaba, otro turno pudo transferirla o cerrarla.
   const room = await Room.findById(roomId)
   if (!room || room.status !== 'bot') return
 
   const rafaga = await tomarRafaga(room._id, room.botAnsweredUntil)
   if (rafaga.length === 0) return
-
-  // El historial termina antes de la ráfaga: lo que el cliente acaba de escribir va una
-  // sola vez, como su mensaje. Antes iba dos veces (en el historial y como mensaje).
-  const history = await Message.find({
-    roomId: room._id,
-    timestamp: { $lt: rafaga[0].timestamp, ...(room.visitStartedAt ? { $gte: room.visitStartedAt } : {}) },
-  })
-    .sort({ timestamp: -1 })
-    .limit(20)
-    .then((msgs) => msgs.reverse())
 
   const userMessage = rafaga
     .map((m) => (m.mediaType === 'image' && m.content === '[Imagen]' ? 'El cliente envió una imagen.' : m.content))
@@ -389,152 +371,18 @@ async function responderTurno(
       ? (baseUrl ? `${baseUrl}${imagen.mediaUrl}` : undefined)
       : imagen.mediaUrl
 
-  const roomData: RoomKnownData = {
-    name: room.name,
-    phone: room.phone || undefined,
-    channel: room.channel,
-    petName: room.petName || undefined,
-    petType: room.petType || undefined,
-    petAge: room.petAge || undefined,
-    petWeight: room.petWeight || undefined,
-    pet2Name: room.pet2Name || undefined,
-    pet2Type: room.pet2Type || undefined,
-    pet2Age: room.pet2Age || undefined,
-    pet2Weight: room.pet2Weight || undefined,
-    pet3Name: room.pet3Name || undefined,
-    pet3Type: room.pet3Type || undefined,
-    pet3Age: room.pet3Age || undefined,
-    pet3Weight: room.pet3Weight || undefined,
-    address: room.address || undefined,
-  }
-
   // El cliente respondió citando un mensaje (casi siempre la foto de un producto, con
-  // "ese"). Meta solo manda el id: el contenido se busca en la sala. Solo si el mensaje
+  // 'ese'). Meta solo manda el id: el contenido se busca en la sala. Solo si el mensaje
   // que trajo la cita está en esta ráfaga (no en una que este turno responde de paso).
   const citaEnRafaga = parsed.replyToId && rafaga.some((m) => String(m._id) === String(inboundId))
   const quoted = citaEnRafaga
-    ? await Message.findOne({ roomId: room._id, waMessageId: parsed.replyToId }).lean()
+    ? await Message.findOne({ roomId: room._id, waMessageId: parsed.replyToId }).lean<{ content: string }>()
     : null
 
-  const agentResponse = await runAgent(
+  await correrTurnoDelBot(room, {
     userMessage,
-    history.map((m) => ({
-      _id: m._id.toString(),
-      roomId: m.roomId.toString(),
-      conversationId: m.roomId.toString(),
-      direction: m.direction,
-      sender: m.sender,
-      content: m.content,
-      waMessageId: m.waMessageId,
-      timestamp: m.timestamp.toISOString(),
-      createdAt: m.createdAt?.toString() ?? '',
-    })),
-    config.systemPrompt,
-    config.transferRules,
-    config.aiModel,
-    config.temperature,
-    room.contextSummary ?? '',
-    room.waId,
-    roomData,
+    antesDe: rafaga[0].timestamp,
     visionUrl,
-    quoted?.content
-  )
-
-  const products = (agentResponse.products as AgentProduct[]).slice(0, 4)
-  // El agente escribe un solo bloque con el saludo, los productos y la cola. Se corta
-  // por donde él puso las URLs: lo de antes sale primero, las fotos llevan la
-  // información una sola vez en su pie, y lo de después sale al final. Así el cliente
-  // nunca recibe un mensaje con los mismos datos que ya trae la foto.
-  const { intro, cola } = buildOutgoingTexts(agentResponse.text, products.map((p) => p.imageUrl))
-  // Si el agente se queda sin texto (herramienta fallida, respuesta vacia) el
-  // cliente NO puede quedarse sin respuesta: siempre sale algo.
-  const relleno = products.length === 0 && !intro && !cola
-    ? 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
-    : ''
-  let waMessageId: string | null = null
-
-  const sendText = async (text: string) => {
-    if (!text) return
-    waMessageId = await sendChannelMessage(parsed.channel, replyTo, text)
-    await Message.create({
-      roomId: room._id,
-      direction: 'outbound',
-      sender: 'bot',
-      content: text,
-      waMessageId: waMessageId ?? undefined,
-      timestamp: new Date(),
-    })
-  }
-
-  await sendText(intro || relleno)
-
-  for (const product of products) {
-    const caption = `${product.name}\n$${product.price.toLocaleString('es-CO')} COP\n${product.description}`
-    const content = product.imageUrl ? `${product.imageUrl}\n${caption}` : caption
-    if (product.imageUrl) {
-      waMessageId = await sendChannelImage(parsed.channel, replyTo, product.imageUrl, caption)
-    } else {
-      waMessageId = await sendChannelMessage(parsed.channel, replyTo, caption)
-    }
-    await Message.create({
-      roomId: room._id,
-      direction: 'outbound',
-      sender: 'bot',
-      content,
-      waMessageId: waMessageId ?? undefined,
-      timestamp: new Date(),
-    })
-  }
-
-  await sendText(cola)
-
-  // El resumen es solo de la visita actual: con el de visitas anteriores el bot citaba
-  // pedidos y fechas viejas como si fueran de hoy.
-  const deEstaVisita = {
-    roomId: room._id,
-    ...(room.visitStartedAt ? { timestamp: { $gte: room.visitStartedAt } } : {}),
-  }
-  Message.countDocuments(deEstaVisita).then((count) => {
-    if (count > 6) {
-      Message.find(deEstaVisita)
-        .sort({ timestamp: 1 })
-        .then((allMsgs) => {
-          const formatted = allMsgs.map((m) => ({
-            _id: m._id.toString(),
-            roomId: m.roomId.toString(),
-            conversationId: m.roomId.toString(),
-            direction: m.direction,
-            sender: m.sender,
-            content: m.content,
-            waMessageId: m.waMessageId,
-            timestamp: m.timestamp.toISOString(),
-            createdAt: m.createdAt?.toString() ?? '',
-          }))
-          return summarizeHistory(formatted)
-        })
-        .then((summary) => {
-          if (summary) Room.updateOne({ _id: room._id }, { contextSummary: summary }).catch(console.error)
-        })
-        .catch(console.error)
-    }
-  }).catch(console.error)
-
-  room.lastMessage = agentResponse.text
-  room.lastMessageAt = new Date()
-
-  if (agentResponse.transfer) {
-    room.status = 'human'
-    const isPaymentReceipt = agentResponse.transferReason?.toLowerCase().includes('comprobante')
-    if (!isPaymentReceipt) {
-      await sendChannelMessage(parsed.channel, replyTo, 'Te voy a conectar con un asesor para que te ayude mejor. ¡Ya te atienden! 🙏')
-    }
-  }
-
-  if (agentResponse.orderCreated) {
-    room.status = 'closed'
-    room.closeReasonName = 'Pedido realizado'
-    room.closedBy = 'bot'
-  }
-
-  await room.save()
+    quotedMessage: quoted?.content,
+  })
 }
