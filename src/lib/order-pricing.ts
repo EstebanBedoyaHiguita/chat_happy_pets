@@ -99,6 +99,24 @@ export function priceItems(freshList: Product[], requested: RequestedItem[], log
 
 export const sumSubtotal = (items: PricedItem[]) => items.reduce((sum, i) => sum + i.lineTotal, 0)
 
+const cop = (n: number) => `$${Number(n || 0).toLocaleString('es-CO')} COP`
+
+/** Resumen de un pedido guardado, con sus valores reales, tal como se le muestra al cliente. */
+export function orderSummaryText(order: {
+  orderNumber: string
+  items: { name: string; quantity: number; lineTotal: number }[]
+  shipping?: number
+  total: number
+}): string {
+  const lineas = order.items.map((i) => `- ${i.quantity} x ${i.name}: ${cop(i.lineTotal)}`)
+  return [
+    `📦 Pedido #${order.orderNumber}`,
+    ...lineas,
+    ...(order.shipping ? [`Envío: ${cop(order.shipping)}`] : []),
+    `Total: ${cop(order.total)}`,
+  ].join('\n')
+}
+
 /**
  * Lo que impide cobrar un pedido, en palabras que el modelo pueda corregir. Vacío = se
  * puede crear. Existe porque priceItems nunca falla: sin match deja precio 0, y sin

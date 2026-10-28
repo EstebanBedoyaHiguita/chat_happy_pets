@@ -9,7 +9,7 @@ import {
   getShippingCost,
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
-import { diffItems, priceItems, pricingProblems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
+import { diffItems, orderSummaryText, priceItems, pricingProblems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
 import { barfFor, buildDisplayInstruction, choosePhotos, decideDisplay, getCatalog, productFromQuote, resolveSpecies, speciesOfProduct, stripCardEcho, type CatalogProduct, type DisplayDecision, type PetType } from './product-display'
 import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
 import { turnGuidance } from './turn-guidance'
@@ -315,18 +315,18 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         {
           const existing = await findPendingOrder(waId)
           if (existing) {
-            const detalle = existing.items
-              .map((i: PricedItem) => `- ${i.quantity} x ${i.name}: $${i.lineTotal.toLocaleString('es-CO')} COP`)
-              .join('\n')
-            const resumen = `📦 Pedido #${existing.orderNumber}\n${detalle}\nTotal: $${existing.total.toLocaleString('es-CO')} COP`
-
+            // El mensaje al cliente lo arma el código y sale tal cual (literalReply, ver
+            // runAgent): cuando el modelo lo "adaptaba", mezclaba el carrito de esta
+            // conversación con el pedido real y le mostraba al cliente un pedido que no existe.
+            const resumen = orderSummaryText(existing)
             return JSON.stringify({
               status: 'error',
               existingOrderNumber: existing.orderNumber,
               paid: existing.paid,
-              instruction: existing.paid
-                ? `El cliente YA tiene un pedido pendiente de entrega y además YA ESTÁ PAGADO: #${existing.orderNumber}.\n\nNO crees un pedido nuevo y NO uses ninguna otra herramienta. Respóndele AHORA con este mensaje (adaptando el tono, sin markdown):\n\n"¡Hola! 😊 Veo que ya tienes un pedido pendiente por entregar:\n\n${resumen}\n\nMientras ese pedido esté en camino no puedo crearte uno nuevo. Te paso con un asesor del equipo para que revise contigo qué necesitas 🐾"\n\nY agrega en la ÚLTIMA línea: {"transfer":true,"reason":"cliente pide otro pedido teniendo uno pendiente ya pagado"}`
-                : `El cliente YA tiene un pedido pendiente de entrega: #${existing.orderNumber}.\n\nNO crees un pedido nuevo. Respóndele AHORA con este mensaje (adaptando el tono, sin markdown), NUNCA te quedes sin responder:\n\n"¡Hola! 😊 Antes de seguir te cuento: ya tienes un pedido pendiente por entregar 🐾\n\n${resumen}\n\nMientras ese pedido esté pendiente no puedo crearte uno nuevo, pero sí puedo modificarlo si quieres agregar o cambiar algo. ¿Te gustaría? 😊"\n\nEspera su respuesta:\n- Si quiere AGREGAR o CAMBIAR productos → llama update_order con orderNumber="${existing.orderNumber}" y la lista COMPLETA y final de productos (los que ya tenía más los nuevos).\n- Si insiste en un pedido NUEVO y aparte → NO lo crees: dile "Claro que sí 😊 Te paso con un asesor del equipo para que te ayude con ese pedido aparte 🐾" y agrega en la ÚLTIMA línea: {"transfer":true,"reason":"cliente quiere un pedido nuevo teniendo uno pendiente"}`,
+              literalReply: existing.paid
+                ? `Veo que ya tienes un pedido pendiente por entregar 😊\n\n${resumen}\n\nMientras ese pedido esté en camino no puedo crearte uno nuevo. Te paso con un asesor del equipo para que revise contigo qué necesitas 🐾\n{"transfer":true,"reason":"cliente pide otro pedido teniendo uno pendiente ya pagado"}`
+                : `Antes de seguir te cuento: ya tienes un pedido pendiente por entregar 🐾\n\n${resumen}\n\nMientras ese pedido esté pendiente no puedo crearte uno nuevo, pero sí puedo agregarle o cambiarle lo que quieras. ¿Te gustaría? 😊`,
+              instruction: 'No se creó ningún pedido: el cliente ya tiene uno pendiente y el sistema le envía su resumen. No escribas nada más.',
             })
           }
         }
@@ -860,6 +860,23 @@ Agrega en la última línea {"transfer":true,"reason":"motivo"} cuando: envía u
     }).join('\n\n'),
   })
 
+  // Su pedido pendiente, con los datos reales. El historial solo cubre la visita actual,
+  // así que quien vuelve a pagar o a agregar algo ya no lo vería ahí.
+  const pendiente = waId ? await findPendingOrder(waId).catch(() => null) : null
+  if (pendiente) {
+    messages.push({
+      role: 'system',
+      content:
+        `EL CLIENTE TIENE UN PEDIDO PENDIENTE DE ENTREGA (datos reales):\n${orderSummaryText(pendiente)}\n` +
+        `${pendiente.paid ? 'Ya está pagado.' : 'Todavía no está pagado.'}\n` +
+        '- Si viene a pagar o pregunta por él, usa estos datos.\n' +
+        (pendiente.paid
+          ? '- Como ya está pagado, cualquier cambio lo hace un asesor: pásalo.\n'
+          : `- Si quiere agregar o cambiar productos, llama update_order con orderNumber="${pendiente.orderNumber}" y la lista COMPLETA y final.\n`) +
+        '- Mientras esté pendiente no se crea otro pedido: si quiere uno aparte, pásalo con un asesor.',
+    })
+  }
+
   // Datos de mascota que faltan, en su propio mensaje: nunca bloquean el pedido. Un
   // cliente que no quiso dar el peso de su perro no puede quedarse sin poder comprar.
   const petMissing = [
@@ -973,6 +990,9 @@ Agrega en la última línea {"transfer":true,"reason":"motivo"} cuando: envía u
   // pedido pendiente…). Ahí la respuesta del modelo — pedir el dato o mostrar el
   // pedido existente con sus totales — es la correcta y no se debe degradar.
   let orderBlocked = false
+  // Respuesta que arma el código y sale tal cual, sin pasar por el modelo (hoy: el
+  // resumen del pedido pendiente cuando create_order se bloquea por duplicado).
+  let literalReply: string | null = null
   // Número real devuelto por la herramienta. Cualquier #WA-... del texto que no sea
   // este está inventado por el modelo.
   let realOrderNumber: string | null = null
@@ -1000,6 +1020,7 @@ Agrega en la última línea {"transfer":true,"reason":"motivo"} cuando: envía u
             if (parsed.orderNumber) realOrderNumber = String(parsed.orderNumber)
           } else if (toolCall.function.name === 'create_order') {
             orderBlocked = true
+            if (typeof parsed.literalReply === 'string') literalReply = parsed.literalReply
           }
         } catch { /* ignore */ }
       }
@@ -1134,6 +1155,8 @@ Agrega en la última línea {"transfer":true,"reason":"motivo"} cuando: envía u
   }
 
   // Si citó un número distinto al que devolvió la herramienta, se corrige.
+  if (literalReply) fullText = literalReply
+
   if (realOrderNumber) {
     fullText = fullText.replace(/WA-\d+/g, realOrderNumber)
   }
