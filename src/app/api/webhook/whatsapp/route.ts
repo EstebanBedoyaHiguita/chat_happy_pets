@@ -118,6 +118,7 @@ async function processMessage(parsed: {
   mediaId?: string
   mediaUrl?: string
   referral?: AdReferral
+  replyToId?: string
 }, baseUrl = '') {
   // Mark as read (WhatsApp only — Messenger/Instagram mark read via different API)
   if (parsed.channel === 'whatsapp') markWhatsAppMessageRead(parsed.messageId)
@@ -364,6 +365,12 @@ async function processMessage(parsed: {
     address: room.address || undefined,
   }
 
+  // El cliente respondió citando un mensaje (casi siempre la foto de un producto, con
+  // "ese"). Meta solo manda el id: el contenido se busca en la sala.
+  const quoted = parsed.replyToId
+    ? await Message.findOne({ roomId: room._id, waMessageId: parsed.replyToId }).lean()
+    : null
+
   const agentResponse = await runAgent(
     audioTranscription || parsed.text || (parsed.mediaType === 'image' ? 'El cliente envió una imagen.' : ''),
     history.map((m) => ({
@@ -385,7 +392,8 @@ async function processMessage(parsed: {
     roomWaId,
     roomData,
     visionUrl,
-    pendingSteps.length > 0 ? pendingSteps : undefined
+    pendingSteps.length > 0 ? pendingSteps : undefined,
+    quoted?.content
   )
 
   const products = (agentResponse.products as AgentProduct[]).slice(0, 4)

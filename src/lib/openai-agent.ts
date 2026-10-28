@@ -10,7 +10,7 @@ import {
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
-import { barfFor, buildDisplayInstruction, choosePhotos, decideDisplay, getCatalog, resolveSpecies, stripCardEcho, type CatalogProduct, type DisplayDecision, type PetType } from './product-display'
+import { barfFor, buildDisplayInstruction, choosePhotos, decideDisplay, getCatalog, productFromQuote, resolveSpecies, speciesOfProduct, stripCardEcho, type CatalogProduct, type DisplayDecision, type PetType } from './product-display'
 import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
 import { getDeliveryDate, withDeliveryMessage } from './delivery'
 import { extractTransferSignal, insertPhotoUrls, toWhatsAppText } from './outgoing-text'
@@ -697,7 +697,9 @@ export async function runAgent(
   waId = '',
   roomData: RoomKnownData = {},
   mediaUrl?: string,
-  pendingSteps?: string[]
+  pendingSteps?: string[],
+  /** Contenido del mensaje que el cliente citó al responder, si citó alguno. */
+  quotedMessage?: string
 ): Promise<AgentResponse> {
   const summarySection = contextSummary
     ? `\nCONTEXTO PREVIO DE ESTA CONVERSACIÓN (resumen):\n${contextSummary}\n`
@@ -1002,19 +1004,27 @@ Si NO hay que transferir, no incluyas ese JSON.`
   let display: { decision: DisplayDecision; barf: CatalogProduct[]; species: PetType[] } | null = null
   try {
     const catalog = await getCatalog()
+    // El cliente respondió citando la foto de un producto ("ese"): ese producto es su
+    // elección, y su especie la de este turno. Sin esto el bot preguntaba "¿cuál?".
+    const citado = productFromQuote(quotedMessage, catalog)
     // La especie se decide en cada turno (mensaje → lo último que dijo → mascotas de la
     // sala), no solo con room.petType: ver resolveSpecies.
-    const species = resolveSpecies(
-      userMessage,
-      conversationHistory.filter((m) => m.direction === 'inbound').map((m) => m.content),
-      [roomData.petType, roomData.pet2Type, roomData.pet3Type]
-    )
+    const species =
+      citado && speciesOfProduct(citado).length > 0
+        ? speciesOfProduct(citado)
+        : resolveSpecies(
+            userMessage,
+            conversationHistory.filter((m) => m.direction === 'inbound').map((m) => m.content),
+            [roomData.petType, roomData.pet2Type, roomData.pet3Type]
+          )
     const barf = barfFor(catalog, species)
     for (const p of catalog) {
       collectedProducts.push({ ...p, image: p.imageUrl })
       if (p.imageUrl) collectedImageUrls.push(p.imageUrl)
     }
-    const decision = decideDisplay(userMessage, barf, catalog)
+    const decision: DisplayDecision = citado
+      ? { mode: 'seleccion', selected: [citado], ambiguous: false, quoted: true }
+      : decideDisplay(userMessage, barf, catalog)
     display = { decision, barf, species }
     const instruction = buildDisplayInstruction(decision, barf, species)
     if (instruction) messages.push({ role: 'system', content: instruction })
@@ -1041,6 +1051,16 @@ Si NO hay que transferir, no incluyas ese JSON.`
   } catch (err) {
     // Sin catálogo el agente sigue con get_products como siempre: nunca se cae por esto.
     console.error('[AGENT] no se pudo cargar el catálogo para la vitrina:', err)
+  }
+
+  // Citó un mensaje que no es la foto de un producto del catálogo (esas las resuelve el
+  // bloque de productos): se le muestra al modelo a qué está respondiendo.
+  if (quotedMessage && display?.decision.quoted !== true) {
+    const cita = quotedMessage.length > 400 ? `${quotedMessage.slice(0, 400)}…` : quotedMessage
+    messages.push({
+      role: 'system',
+      content: `El siguiente mensaje del cliente responde citando este mensaje anterior de la conversación:\n«${cita}»\nInterpreta su respuesta en relación con ese mensaje.`,
+    })
   }
 
   if (mediaUrl) {

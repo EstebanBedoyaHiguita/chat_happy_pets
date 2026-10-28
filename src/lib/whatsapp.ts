@@ -174,6 +174,7 @@ export interface IncomingWhatsAppMessage {
   mediaId?: string   // WhatsApp media_id (requires auth download)
   mediaUrl?: string  // Messenger/Instagram direct URL
   referral?: AdReferral
+  replyToId?: string // id del mensaje que el cliente citó al responder ("ese" sobre una foto)
 }
 
 export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhatsAppMessage | null {
@@ -218,6 +219,7 @@ export function parseWebhookPayload(body: Record<string, unknown>): IncomingWhat
       timestamp: message.timestamp as string,
       channel: 'whatsapp' as const,
       referral,
+      replyToId: (message.context as Record<string, unknown> | undefined)?.id as string | undefined,
     }
 
     if (message.type === 'text') {
@@ -425,6 +427,7 @@ export function parseMessengerPayload(body: Record<string, unknown>): IncomingWh
       messageId: message.mid as string,
       timestamp: String(messaging.timestamp ?? Date.now()),
       channel,
+      replyToId: (message.reply_to as Record<string, unknown> | undefined)?.mid as string | undefined,
     }
 
     if (message.text) {

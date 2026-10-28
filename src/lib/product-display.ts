@@ -147,6 +147,28 @@ export function resolveSpecies(
   return (['perro', 'gato'] as PetType[]).filter((s) => pets.has(s))
 }
 
+/**
+ * El producto de la tarjeta que el cliente citó al responder. Las tarjetas se guardan en
+ * `messages` como `${imageUrl}\n${name}\n$precio COP\n${descripción}` (ver el webhook):
+ * se busca por la URL y, si el catálogo la cambió, por el nombre.
+ */
+export function productFromQuote<T extends { name: string; imageUrl: string }>(
+  quoted: string | undefined,
+  catalog: T[]
+): T | null {
+  if (!quoted) return null
+  const [primera = '', segunda = ''] = quoted.split('\n').map((l) => l.trim())
+  if (!primera.startsWith('http')) return null
+  return (
+    catalog.find((p) => p.imageUrl && p.imageUrl === primera) ??
+    catalog.find((p) => normalize(p.name) === normalize(segunda)) ??
+    null
+  )
+}
+
+/** La especie de una dieta BARF; vacío para lo que no es BARF (snacks sirven a todos). */
+export const speciesOfProduct = (p: { name: string }): PetType[] => (isBarf(p) ? [petTypeOf(p)] : [])
+
 /** Dietas BARF de las especies dadas. Sin especie conocida, las de perro. */
 export function barfFor(products: CatalogProduct[], species: PetType[]): CatalogProduct[] {
   const target: PetType[] = species.length > 0 ? species : ['perro']
@@ -178,6 +200,8 @@ export interface DisplayDecision {
   selected: CatalogProduct[]
   /** True cuando el cliente fue impreciso ("pollo") y hay más de un sabor posible. */
   ambiguous: boolean
+  /** True cuando el producto sale de la foto que el cliente citó: ya la tiene en pantalla. */
+  quoted?: boolean
 }
 
 /**
@@ -350,6 +374,17 @@ export function buildDisplayInstruction(
   const prices = barf.map((p) => p.price)
   const rango = `${cop(Math.min(...prices))} a ${cop(Math.max(...prices))}`
 
+  if (decision.quoted && decision.selected[0]) {
+    const p = decision.selected[0]
+    return (
+      `EL CLIENTE RESPONDIÓ CITANDO LA FOTO DE ESTE PRODUCTO: ${p.name} — ${cop(p.price)}.\n` +
+      `Cuando dice "ese", "esa", "este", "quiero" o "me interesa", se refiere a ${p.name}. ` +
+      'No le preguntes cuál: ya lo eligió. Ya tiene la foto en pantalla, así que NO la vuelvas a enviar ni ' +
+      'escribas su URL. Si es una elección, confírmala y pregúntale si quiere agregar otro sabor; ' +
+      'si pregunta algo sobre ese producto, respóndele sobre ese.'
+    )
+  }
+
   if (decision.mode === 'seleccion') {
     const selected = decision.selected.slice(0, 4)
     const variasEspecies = new Set(selected.map(petTypeOf)).size > 1
@@ -438,7 +473,9 @@ export function choosePhotos<T extends { name: string; imageUrl: string }>(opts:
     .sort((a, b) => text.indexOf(a.imageUrl) - text.indexOf(b.imageUrl))
 
   let sugeridas: CatalogProduct[] = []
-  if (decision?.mode === 'seleccion') {
+  if (decision?.quoted) {
+    // Citó la foto: ya la tiene en pantalla.
+  } else if (decision?.mode === 'seleccion') {
     sugeridas = decision.selected.slice(0, MAX_PHOTOS)
   } else if (decision?.mode === 'descubrimiento' && species.length > 0) {
     const vitrina = showcaseFor(barf, species)
