@@ -48,6 +48,22 @@ export function isSupplierWaId(id: string): boolean {
   return !!supplier && id.replace(/\D/g, '') === supplier
 }
 
+/**
+ * Números de prueba: sus pedidos nunca se le avisan al proveedor. Sin esto, cada prueba
+ * del bot desde la sala de Esteban le llegaba al proveedor como un pedido real.
+ * Se pueden sumar más con SUPPLIER_SKIP_WAIDS (separados por coma).
+ */
+const NUMEROS_DE_PRUEBA = new Set(
+  ['573122188251', ...(process.env.SUPPLIER_SKIP_WAIDS ?? '').split(',')]
+    .map((n) => n.replace(/\D/g, ''))
+    .filter(Boolean)
+)
+
+export function isTestWaId(id?: string | null): boolean {
+  const digits = (id ?? '').replace(/\D/g, '')
+  return !!digits && (NUMEROS_DE_PRUEBA.has(digits) || NUMEROS_DE_PRUEBA.has(`57${digits}`))
+}
+
 let _openai: OpenAI | null = null
 function getOpenAI() {
   if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -148,6 +164,13 @@ export function notifySupplier(orderNumber: string): Promise<void> {
       return
     }
     await connectDB()
+    const order = await BotOrder.findOne({ orderNumber })
+      .select('waId customerPhone')
+      .lean<{ waId?: string; customerPhone?: string }>()
+    if (order && (isTestWaId(order.waId) || isTestWaId(order.customerPhone))) {
+      console.warn('[supplier] pedido de un número de prueba: no se le avisa al proveedor', orderNumber)
+      return
+    }
     await BotOrder.updateOne(
       { orderNumber, supplier: { $exists: false } },
       { $set: { supplier: { status: 'queued', queuedAt: new Date() } } }
