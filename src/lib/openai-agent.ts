@@ -12,6 +12,8 @@ import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
 import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, stripCardEcho } from './product-display'
 import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
+import { getDeliveryDate, withDeliveryMessage } from './delivery'
+import { extractTransferSignal, toWhatsAppText } from './outgoing-text'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -684,39 +686,6 @@ export interface RoomKnownData {
   address?: string
 }
 
-function getDeliveryDate(): string {
-  const COLOMBIA_TZ = 'America/Bogota'
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: COLOMBIA_TZ }))
-  const delivery = new Date(now)
-  delivery.setDate(delivery.getDate() + 1)
-
-  // Colombian public holidays 2026 and 2027
-  const holidays = new Set([
-    '2026-01-01','2026-01-12','2026-03-23','2026-04-02','2026-04-03',
-    '2026-05-01','2026-05-18','2026-06-08','2026-06-15','2026-06-29',
-    '2026-07-20','2026-08-07','2026-08-17','2026-10-12','2026-11-02',
-    '2026-11-16','2026-12-08','2026-12-25',
-    '2027-01-01','2027-01-11','2027-03-22','2027-03-25','2027-03-26',
-    '2027-05-01','2027-05-10','2027-05-31','2027-06-07','2027-06-28',
-    '2027-07-20','2027-08-07','2027-08-16','2027-10-18','2027-11-01',
-    '2027-11-15','2027-12-08','2027-12-25',
-  ])
-
-  const toDateStr = (d: Date) =>
-    d.toLocaleDateString('en-CA', { timeZone: COLOMBIA_TZ }) // YYYY-MM-DD
-
-  for (let i = 0; i < 14; i++) {
-    const dow = new Date(delivery.toLocaleString('en-US', { timeZone: COLOMBIA_TZ })).getDay()
-    if (dow !== 0 && !holidays.has(toDateStr(delivery))) break
-    delivery.setDate(delivery.getDate() + 1)
-  }
-
-  const dayNames = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado']
-  const monthNames = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
-  const local = new Date(delivery.toLocaleString('en-US', { timeZone: COLOMBIA_TZ }))
-  return `${dayNames[local.getDay()]} ${local.getDate()} de ${monthNames[local.getMonth()]}`
-}
-
 export async function runAgent(
   userMessage: string,
   conversationHistory: IMessage[],
@@ -880,11 +849,13 @@ Datos para transferencia:
 
 IMPORTANTE SOBRE PAGO CONTRA ENTREGA: Si el cliente pregunta por pago contra entrega, SIEMPRE confirma que sí es posible pero aclara que el pago debe ser por transferencia bancaria en el momento de recibir, nunca en efectivo.
 
-Después del mensaje de pago, envía SIEMPRE este mensaje de entrega EXACTAMENTE como aparece (no lo parafrasees, no escribas "mañana" ni otra fecha):
+PAGO CON TARJETA: el domiciliario no recibe ningún tipo de pago, ni efectivo ni tarjeta. Si el cliente quiere pagar con tarjeta, dile que un asesor le puede generar un link de pago para pagar con cualquier tarjeta, y transfiere:
+{"transfer":true,"reason":"cliente quiere pagar con link de pago"}
 
-"📦 Tu pedido llegará el ${getDeliveryDate()}. Recuerda que no realizamos entregas los domingos ni días festivos."
+FECHA Y HORA DE ENTREGA: los pedidos hechos antes de las 11 p. m. llegan el siguiente día hábil. Si el cliente pregunta cuándo le llegaría, la fecha es el ${getDeliveryDate()}. Se entrega en la mañana (8:00 a. m. a 12:00 m.) o en la tarde (2:00 a 6:00 p. m.) según cómo quede armada la ruta del domiciliario ese día: explícaselo así y NUNCA prometas una hora exacta.
+En el mensaje del pedido registrado NO escribas la fecha de entrega ni te despidas: el sistema agrega solo el mensaje de entrega.
 
-Luego envía SIEMPRE este mensaje de despedida (adapta el nombre de la mascota con el que tengas guardado, si no tienes usa "tu peludo"):
+Cuando el cliente responda qué opción de pago prefiere, confírmale con calidez y despídete con este mensaje (adapta el nombre de la mascota con el que tengas guardado, si no tienes usa "tu peludo"):
 
 "¡Gracias por confiar en Happy Pets Family para el cuidado de [nombre mascota] 🐾❤️ Para nosotros es un honor acompañarlos en este camino hacia una vida más sana y natural.
 
@@ -1254,6 +1225,13 @@ Si NO hay que transferir, no incluyas ese JSON.`
     fullText = fullText.replace(/WA-\d+/g, realOrderNumber)
   }
 
+  // La señal de transferencia sale primero, venga donde venga; después el texto pasa a
+  // formato de WhatsApp (sin markdown, cada URL de foto en su línea) y, si el pedido se
+  // acaba de crear, la entrega la pone el código. Ver outgoing-text.ts y delivery.ts.
+  const signal = extractTransferSignal(fullText)
+  fullText = toWhatsAppText(signal.text)
+  if (orderCreated) fullText = withDeliveryMessage(fullText)
+
   // Only send product cards for products whose image URL the agent explicitly included
   // in its response. This lets the agent list products as plain text (no image URLs)
   // for the initial BARF presentation, and only show image cards when the client
@@ -1271,30 +1249,14 @@ Si NO hay que transferir, no incluyas ese JSON.`
     })
     .sort((a, b) => fullText.indexOf(a.imageUrl) - fullText.indexOf(b.imageUrl))
 
-  // Parse transfer signal from last line
-  const lines = fullText.split('\n')
-  const lastLine = lines[lines.length - 1].trim()
-  let transfer = false
-  let transferReason: string | undefined
+  let transfer = signal.transfer
+  let transferReason = signal.reason
   let cleanText = fullText
 
-  try {
-    if (lastLine.startsWith('{') && lastLine.includes('"transfer"')) {
-      const parsed = JSON.parse(lastLine)
-      if (parsed.transfer === true) {
-        transfer = true
-        transferReason = parsed.reason
-        cleanText = lines.slice(0, -1).join('\n').trim()
-        // Also check intent-based rules
-        const intentCheck = checkIntentRules(parsed.reason ?? '', transferRules)
-        if (intentCheck.triggered) {
-          transfer = true
-          transferReason = intentCheck.ruleName
-        }
-      }
-    }
-  } catch {
-    // No transfer JSON found, that's fine
+  if (transfer) {
+    // Also check intent-based rules
+    const intentCheck = checkIntentRules(transferReason ?? '', transferRules)
+    if (intentCheck.triggered) transferReason = intentCheck.ruleName
   }
 
   if (forceTransfer) {

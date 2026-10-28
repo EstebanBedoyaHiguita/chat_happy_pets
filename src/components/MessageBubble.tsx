@@ -16,7 +16,10 @@ const SENDER_LABEL: Record<string, string> = {
   human: 'Asesor',
 }
 
-const URL_REGEX = new RegExp('(https?://[^\t\n\r ]+)', 'g')
+// Sin ")" ni "]": de lo contrario `[Imagen](url)` pinta una imagen rota cuya URL termina
+// en ")". Desde 2026-10-27 el bot ya no envía markdown, pero los mensajes viejos sí lo tienen.
+const URL_REGEX = new RegExp('(https?://[^\\s()\\[\\]]+)', 'g')
+const MARKDOWN_LINK = /!?\[[^\]\n]*\]\((https?:\/\/[^\s)]+)\)/g
 
 function isImageUrl(url: string) {
   const clean = url.split('?')[0].toLowerCase()
@@ -31,7 +34,7 @@ function isImageUrl(url: string) {
 }
 
 function renderContent(content: string) {
-  const parts = content.split(URL_REGEX)
+  const parts = content.replace(MARKDOWN_LINK, '$1').split(URL_REGEX)
   return parts.map((part, i) => {
     if (part.startsWith('http://') || part.startsWith('https://')) {
       if (isImageUrl(part)) {

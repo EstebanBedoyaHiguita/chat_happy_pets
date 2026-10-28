@@ -326,10 +326,14 @@ export function buildDisplayInstruction(
  *  - "¿Pollo o Res?": mezcla dos productos, no es el eco de uno.
  *  - "Perfecto, entonces quieres la Dieta Barf Pollo con Frutas": trae palabras propias.
  *  - Cualquier línea con URL: apagar una foto es justo lo que rompió el flujo.
+ *
+ * También borra la línea que es, palabra por palabra, la descripción de uno de esos
+ * productos: el pie de la foto ya la trae ("Nutrición ligera y balanceada…" salía
+ * encima de la tarjeta de Pollo, que dice lo mismo).
  */
 export function stripCardEcho(
   text: string,
-  productos: { name: string; price: number }[]
+  productos: { name: string; price: number; description?: string }[]
 ): string {
   if (productos.length === 0) return text
 
@@ -351,12 +355,24 @@ export function stripCardEcho(
     for (const w of palabras(p.price.toLocaleString('es-CO'))) propias.add(w)
     return propias
   })
+  // Línea por línea: las descripciones del catálogo traen dos ("🐔 Pollo con verduras"
+  // y "Nutrición ligera…"), y el modelo copia una sola.
+  const descripciones = new Set(
+    productos
+      .flatMap((p) => (p.description ?? '').split('\n'))
+      .map((l) => palabras(l).join(' '))
+      .filter(Boolean)
+  )
 
   return text
     .split('\n')
     .filter((linea) => {
       if (linea.includes('http')) return true
-      const ws = palabras(linea).filter((w) => !RELLENO.has(w))
+      // "1. Dieta Barf Pollo" o "- Dieta Barf Pollo" es el mismo eco: la numeración no
+      // es una palabra propia.
+      const contenido = linea.replace(/^\s*(?:\d+[.)]|[-•*])\s+/, '')
+      if (descripciones.has(palabras(contenido).join(' '))) return false
+      const ws = palabras(contenido).filter((w) => !RELLENO.has(w))
       if (ws.length === 0) return true
       return !porProducto.some((propias) => ws.every((w) => propias.has(w)))
     })

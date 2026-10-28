@@ -6,7 +6,8 @@ import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
 import { cookies } from 'next/headers'
 import { runAgent, RoomKnownData } from '@/lib/openai-agent'
-import { sendChannelMessage, sendChannelImage, extractImageUrls, splitAroundImages, channelRecipientId } from '@/lib/whatsapp'
+import { sendChannelMessage, sendChannelImage, channelRecipientId } from '@/lib/whatsapp'
+import { buildOutgoingTexts } from '@/lib/outgoing-text'
 import { DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { AgentProduct } from '@/lib/openai-agent'
 
@@ -137,9 +138,7 @@ async function resumeBot(roomId: string) {
   const products = (agentResponse.products as AgentProduct[]).slice(0, 4)
   // Mismo criterio que el webhook: se corta el texto por donde el agente puso las URLs
   // para que la información del producto viaje una sola vez, en el pie de la foto.
-  const split = splitAroundImages(agentResponse.text, products.map((p) => p.imageUrl))
-  const intro = extractImageUrls(split.before).cleanText.trim()
-  const cola = extractImageUrls(split.after).cleanText.trim()
+  const { intro, cola } = buildOutgoingTexts(agentResponse.text, products.map((p) => p.imageUrl))
   const relleno = products.length === 0 && !intro && !cola
     ? 'Dame un momentico que reviso bien tu solicitud y te confirmo 😊🐾'
     : ''

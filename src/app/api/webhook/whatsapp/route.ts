@@ -5,7 +5,8 @@ import { Room } from '@/lib/models/Room'
 import { Customer } from '@/lib/models/Customer'
 import { Message } from '@/lib/models/Message'
 import { AgentConfig } from '@/lib/models/AgentConfig'
-import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, extractImageUrls, splitAroundImages, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
+import { parseWebhookPayload, parseMessengerPayload, sendChannelMessage, sendChannelImage, markWhatsAppMessageRead, getWhatsAppAudioBuffer, getMetaUserProfile, channelRecipientId, type AdReferral } from '@/lib/whatsapp'
+import { buildOutgoingTexts } from '@/lib/outgoing-text'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import { fetchAdNames } from '@/lib/meta-ads'
@@ -380,9 +381,7 @@ async function processMessage(parsed: {
   // por donde él puso las URLs: lo de antes sale primero, las fotos llevan la
   // información una sola vez en su pie, y lo de después sale al final. Así el cliente
   // nunca recibe un mensaje con los mismos datos que ya trae la foto.
-  const split = splitAroundImages(agentResponse.text, products.map((p) => p.imageUrl))
-  const intro = extractImageUrls(split.before).cleanText.trim()
-  const cola = extractImageUrls(split.after).cleanText.trim()
+  const { intro, cola } = buildOutgoingTexts(agentResponse.text, products.map((p) => p.imageUrl))
   // Si el agente se queda sin texto (herramienta fallida, respuesta vacia) el
   // cliente NO puede quedarse sin respuesta: siempre sale algo.
   const relleno = products.length === 0 && !intro && !cola
