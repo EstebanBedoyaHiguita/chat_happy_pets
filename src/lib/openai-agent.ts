@@ -12,6 +12,7 @@ import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, pricingProblems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
 import { barfFor, buildDisplayInstruction, choosePhotos, decideDisplay, getCatalog, productFromQuote, resolveSpecies, speciesOfProduct, stripCardEcho, type CatalogProduct, type DisplayDecision, type PetType } from './product-display'
 import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
+import { turnGuidance } from './turn-guidance'
 import { getDeliveryDate, withDeliveryMessage } from './delivery'
 import { extractTransferSignal, insertPhotoUrls, toWhatsAppText } from './outgoing-text'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
@@ -261,7 +262,7 @@ function pricingBlock(freshList: Record<string, unknown>[], requested: Requested
   return `NO puedes registrar el pedido todavía: ${problems.join('; ')}.\nProductos del catálogo: ${nombres}.\nUsa el nombre EXACTO del catálogo y la cantidad que dijo el cliente. Si no sabes la cantidad de algún producto, pregúntasela; nunca la inventes. Si pidió algo que no vendemos, díselo con amabilidad y ofrécele lo más parecido.`
 }
 
-async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}, pendingSteps: string[] = []): Promise<string> {
+async function executeTool(name: string, args: Record<string, unknown>, waId?: string, _collectedProducts: AgentProduct[] = [], roomData: RoomKnownData = {}): Promise<string> {
   console.log('[Tool call]', name, JSON.stringify(args))
   try {
     let result
@@ -282,13 +283,9 @@ async function executeTool(name: string, args: Record<string, unknown>, waId?: s
         result = await getCities()
         break
       case 'create_order': {
-        // Hard block: pending steps must be completed before creating any order
-        if (pendingSteps.length > 0) {
-          return JSON.stringify({
-            status: 'error',
-            instruction: `NO puedes crear el pedido todavía. Hay pasos OBLIGATORIOS que debes completar PRIMERO en este orden:\n${pendingSteps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nCompleta estos pasos ahora. NO llames create_order hasta haberlos completado.`,
-          })
-        }
+        // Hasta 2026-10-28 había un bloqueo más: los pendingSteps (saludo, ofrecer snacks)
+        // detectados por texto. Un cliente al que nunca se le ofrecieron snacks no podía
+        // comprar. Ahora son guía (turn-guidance.ts) y aquí solo se exigen los datos.
         // Hard block: name is mandatory before creating any order
         const customerName = roomData?.name ?? ''
         if (!customerName || customerName === 'Desconocido') {
@@ -735,7 +732,6 @@ export async function runAgent(
   waId = '',
   roomData: RoomKnownData = {},
   mediaUrl?: string,
-  pendingSteps?: string[],
   /** Contenido del mensaje que el cliente citó al responder, si citó alguno. */
   quotedMessage?: string
 ): Promise<AgentResponse> {
@@ -1006,17 +1002,20 @@ Si NO hay que transferir, no incluyas ese JSON.`
     })
   }
 
-  // Inject detected pending steps from the webhook (reliable state detection)
-  if (pendingSteps && pendingSteps.length > 0) {
-    messages.push({
-      role: 'system',
-      content: `⚠️ PASOS PENDIENTES DETECTADOS — DEBES COMPLETARLOS EN ESTE ORDEN ANTES DE CREAR EL PEDIDO:\n${pendingSteps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
-    })
-  }
+  // Lo que tiene presente en este turno: saludo, snacks, qué datos del pedido tiene y
+  // cuáles le faltan. Calculado en código y sin bloquear nada (ver turn-guidance.ts).
+  messages.push({
+    role: 'system',
+    content: turnGuidance({
+      history: conversationHistory,
+      name: roomData.name,
+      phone: knownPhone,
+      address: roomData.address,
+    }).join('\n\n'),
+  })
 
-  // Datos de mascota que faltan. Va en su propio mensaje system y NO en pendingSteps:
-  // create_order se bloquea si pendingSteps trae algo, y un cliente que no quiso dar el
-  // peso de su perro no puede quedarse sin poder comprar.
+  // Datos de mascota que faltan, en su propio mensaje: nunca bloquean el pedido. Un
+  // cliente que no quiso dar el peso de su perro no puede quedarse sin poder comprar.
   const petMissing = [
     !roomData.petName && 'nombre',
     !roomData.petAge && 'edad',
@@ -1071,7 +1070,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
     // ya se lo ordena y el modelo lo desobedeció: el 2026-09-04 saltó al resumen con
     // "1 paquete" inventado de cada sabor. Se le recuerda aquí, en un system tardío.
     // 'ninguno' garantiza que el mensaje no nombró ningún sabor: es un cierre, no una
-    // elección más. Va fuera de pendingSteps para no bloquear create_order.
+    // elección más. Es un recordatorio, no un bloqueo.
     if (
       decision.mode === 'ninguno' &&
       cierraListaDeSabores(userMessage) &&
@@ -1143,7 +1142,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
     const toolCalls = ((assistantMessage.tool_calls ?? []) as FnCall[]).filter((tc) => tc.type === 'function')
     for (const toolCall of toolCalls) {
       const args = JSON.parse(toolCall.function.arguments || '{}')
-      const result = await executeTool(toolCall.function.name, args, waId, collectedProducts, roomData, pendingSteps ?? [])
+      const result = await executeTool(toolCall.function.name, args, waId, collectedProducts, roomData)
       calledTools.add(toolCall.function.name)
 
       // Detect successful order creation

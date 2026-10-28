@@ -323,29 +323,7 @@ async function processMessage(parsed: {
     .limit(20)
     .then((msgs) => msgs.reverse())
 
-  // Detect pending flow steps so the agent doesn't skip them
-  const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
-  // El resumen se detecta por la pregunta de confirmación + las cantidades en paquetes.
-  // Antes se exigía además 'total' y 'cop', que ninguno de los dos formatos de resumen
-  // trae ("Tu pedido es: … ¿Todo correcto?"), así que el paso de snacks nunca disparaba.
-  const orderSummaryShown = outboundTexts.some(t =>
-    (t.includes('es correcto?') || t.includes('todo correcto?')) &&
-    (t.includes('paquete') || t.includes('paquetes'))
-  )
-  const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
-
-  const pendingSteps: string[] = []
-
-  const hasOutbound = outboundTexts.length > 0
-  if (!hasOutbound) {
-    const clientName = room.name && room.name !== 'Desconocido' ? room.name : ''
-    pendingSteps.push(`SALUDO OBLIGATORIO — PRIMER MENSAJE: Tu respuesta DEBE comenzar EXACTAMENTE así antes de cualquier otra cosa: "¡Hola${clientName ? ` ${clientName}` : ''}! Soy Sara, asesora virtual de Happy Pets Family 🐾" — luego continúa respondiendo lo que el cliente necesita en el mismo mensaje. NO omitas este saludo bajo ninguna circunstancia.`)
-  }
-
-  if (orderSummaryShown && !snacksOffered) {
-    pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Cuando el cliente confirme el resumen del pedido ("sí, es correcto" o similar), lo PRIMERO que debes hacer es ofrecer snacks ANTES de pedir dirección, ciudad o cualquier otro dato.')
-  }
-
+  // Saludo, snacks y datos del pedido los calcula runAgent (turn-guidance.ts).
   const roomData: RoomKnownData = {
     name: room.name,
     phone: room.phone || undefined,
@@ -392,7 +370,6 @@ async function processMessage(parsed: {
     roomWaId,
     roomData,
     visionUrl,
-    pendingSteps.length > 0 ? pendingSteps : undefined,
     quoted?.content
   )
 

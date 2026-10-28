@@ -73,21 +73,8 @@ async function resumeBot(roomId: string) {
     .limit(20)
     .then((msgs) => msgs.reverse())
 
-  const outboundTexts = history.filter(m => m.direction === 'outbound').map(m => m.content.toLowerCase())
-  const allTexts = history.map(m => m.content.toLowerCase())
-  // Mismo criterio que el webhook: exigir 'total' y 'cop' nunca disparaba, porque
-  // ningún formato de resumen los trae.
-  const orderSummaryShown = outboundTexts.some(t =>
-    (t.includes('es correcto?') || t.includes('todo correcto?')) &&
-    (t.includes('paquete') || t.includes('paquetes'))
-  )
-  const snacksOffered = outboundTexts.some(t => t.includes('snack') || t.includes('deshidratado') || t.includes('galleta') || t.includes('premio'))
-
-  const pendingSteps: string[] = []
-  if (orderSummaryShown && !snacksOffered) {
-    pendingSteps.push('OFRECER SNACKS: el cliente vio/eligió productos BARF pero aún no se le han ofrecido snacks. Cuando el cliente confirme el resumen del pedido ("sí, es correcto" o similar), lo PRIMERO que debes hacer es ofrecer snacks ANTES de pedir dirección, ciudad o cualquier otro dato.')
-  }
-
+  // Saludo, snacks y datos del pedido los calcula runAgent (turn-guidance.ts), igual
+  // que para el webhook.
   let config = await AgentConfig.findOne()
   if (!config) config = await AgentConfig.create({ transferRules: DEFAULT_TRANSFER_RULES })
 
@@ -129,9 +116,7 @@ async function resumeBot(roomId: string) {
     config.temperature,
     room.contextSummary ?? '',
     room.waId,
-    roomData,
-    undefined,
-    pendingSteps.length > 0 ? pendingSteps : undefined
+    roomData
   )
 
   const recipientId = channelRecipientId(room)
