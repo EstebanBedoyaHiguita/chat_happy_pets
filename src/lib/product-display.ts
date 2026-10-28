@@ -38,6 +38,16 @@ const NON_FLAVOR = new Set([
   'dieta', 'barf', 'gato', 'de', 'del', 'la', 'el', 'los', 'las', 'con', 'para', 'y', 'a',
 ])
 
+/**
+ * Palabras que el cliente usa para un sabor y que no están en su nombre. "Pollo con
+ * verduras" es como la descripción del catálogo llama a la Dieta Barf Pollo, así que
+ * "pollo con verduras" no es ambiguo con Pollo Frutas. Solo desempatan: "verduras" a
+ * secas no elige nada, porque casi todos los sabores son "con verduras".
+ */
+const ALIASES: Record<string, string[]> = {
+  'dieta barf pollo': ['verdura'],
+}
+
 /** El cliente escribe "pollo fruta" y el catálogo dice "Pollo Frutas": singular = plural. */
 const singular = (w: string) => (w.length > 4 && w.endsWith('s') ? w.slice(0, -1) : w)
 
@@ -279,7 +289,7 @@ export function decideDisplay(
 
   // "pollo con frutas" matchea Pollo y Pollo Frutas: gana el más específico y se
   // descarta el que es subconjunto del otro.
-  const specific = full.filter(
+  const masEspecificos = full.filter(
     (p) =>
       !full.some((other) => {
         if (other === p) return false
@@ -288,6 +298,19 @@ export function decideDisplay(
         return a.length < b.length && a.every((t) => b.includes(t))
       })
   )
+  // Un alias desempata: "pollo con verduras" es la Dieta Barf Pollo, no Pollo Frutas.
+  const conAlias = masEspecificos.filter((p) =>
+    (ALIASES[normalize(p.name)] ?? []).some((t) => said.has(t))
+  )
+  if (conAlias.length > 0) {
+    // Se descartan solo sus competidores (los que comparten sabor, como Gato De Pollo);
+    // "pollo con verduras y res" conserva la Res.
+    const compite = (p: CatalogProduct) =>
+      !conAlias.includes(p) &&
+      conAlias.some((a) => flavorTokens(a.name).some((t) => flavorTokens(p.name).includes(t)))
+    return { mode: 'seleccion', selected: masEspecificos.filter((p) => !compite(p)), ambiguous: false }
+  }
+  const specific = masEspecificos
 
   // "pollo" a secas: es match exacto de "Dieta Barf Pollo", pero también podría
   // referirse a "Pollo Frutas". Se muestran ambos y elige el cliente — nunca se
