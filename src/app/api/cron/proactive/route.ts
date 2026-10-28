@@ -4,26 +4,9 @@ import { Room } from '@/lib/models/Room'
 import { Message } from '@/lib/models/Message'
 import { BotOrder } from '@/lib/models/BotOrder'
 import { sendChannelMessage, channelRecipientId } from '@/lib/whatsapp'
+import { debeHacerSeguimiento, dentroDeHorario, etapaQueToca, mensajeProactivo } from '@/lib/proactive'
 
-const MESSAGES = [
-  // Stage 1 — 1 hour
-  (name: string, petName?: string) =>
-    `¡Hola ${name}! 🐾 Vi que quedaste con dudas sobre la dieta BARF${petName ? ` para ${petName}` : ''}. ¿Hay algo puntual que pueda explicarte para ayudarte a decidir?`,
-
-  // Stage 2 — 12 hours
-  (name: string, petName?: string) =>
-    `Hola ${name}, quería contarte que muchos perritos en Medellín ya están comiendo BARF y los cambios más frecuentes son digestión estable, pelaje brillante y más energía 🐕 ¿Le damos esa oportunidad a${petName ? ` ${petName}` : ' tu peludo'}?`,
-
-  // Stage 3 — 23 hours
-  (name: string) =>
-    `¡Hola ${name}! 😊 Último mensaje del día. Si decides dar el paso, aquí estamos para acompañarte en todo el proceso. Sin complicaciones, con domicilio a tu puerta. 🚪`,
-]
-
-const DELAYS_MS = [
-  1 * 60 * 60 * 1000,   // 1h
-  12 * 60 * 60 * 1000,  // 12h
-  23 * 60 * 60 * 1000,  // 23h
-]
+// Las reglas (horario, etapas, textos, cuándo NO escribir) viven en lib/proactive.ts.
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -31,9 +14,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  await connectDB()
-
   const now = new Date()
+  // Fuera de horario no se le escribe a nadie: lo pendiente sale en la siguiente
+  // ejecución dentro del horario, si la ventana de 24 h sigue abierta.
+  if (!dentroDeHorario(now)) {
+    return NextResponse.json({ sent: 0, skipped: 'fuera de horario', checkedAt: now.toISOString() })
+  }
+
+  await connectDB()
 
   // Rooms eligible: bot status, within 24h window, proactiveStage < 3
   const rooms = await Room.find({
@@ -56,6 +44,8 @@ export async function GET(req: NextRequest) {
 
   for (const room of rooms) {
     if (orderedWaIds.has(room.waId)) continue
+    // El bot está respondiendo en este momento: no se le cruza un seguimiento.
+    if (room.botLockUntil && new Date(room.botLockUntil) > now) continue
 
     // Use lastInboundAt if available, fall back to lastMessageAt for older rooms
     const lastInbound = room.lastInboundAt
@@ -65,22 +55,29 @@ export async function GET(req: NextRequest) {
         : null
     if (!lastInbound) continue
 
-    const elapsed = now.getTime() - lastInbound.getTime()
     const stage = room.proactiveStage ?? 0
-
-    // Find which stage to send (first one whose delay has passed and hasn't been sent yet)
-    let stageToSend = -1
-    for (let i = stage; i < DELAYS_MS.length; i++) {
-      if (elapsed >= DELAYS_MS[i]) {
-        stageToSend = i
-      }
-    }
-
+    const stageToSend = etapaQueToca(now.getTime() - lastInbound.getTime(), stage)
     if (stageToSend === -1) continue
 
-    const clientName = room.name && room.name !== 'Desconocido' ? room.name : 'amigo'
-    const petName = room.petName || undefined
-    const text = MESSAGES[stageToSend](clientName, petName)
+    const ultimo = await Message.findOne({ roomId: room._id }).sort({ timestamp: -1 }).select('direction').lean<{ direction: string }>()
+    if (!debeHacerSeguimiento(ultimo)) {
+      console.warn(`[Proactive] ${room.waId}: lo último es del cliente y nadie le respondió; no se envía seguimiento`)
+      continue
+    }
+
+    // La etapa se reclama ANTES de enviar: dos ejecuciones simultáneas del cron enviaban
+    // el mismo mensaje dos veces, porque cada una marcaba la etapa después de mandarlo.
+    const claim = await Room.updateOne(
+      { _id: room._id, proactiveStage: stage },
+      { $set: { proactiveStage: stageToSend + 1 } }
+    )
+    if (claim.modifiedCount !== 1) continue
+
+    const text = mensajeProactivo(stageToSend, {
+      name: room.name,
+      petName: room.petName || undefined,
+      petTypes: [room.petType, room.pet2Type, room.pet3Type],
+    })
 
     try {
       const recipientId = channelRecipientId(room)
@@ -94,12 +91,7 @@ export async function GET(req: NextRequest) {
         waMessageId: waMessageId ?? undefined,
         timestamp: new Date(),
       })
-
-      // Atomic update to avoid race conditions
-      await Room.updateOne(
-        { _id: room._id, proactiveStage: stage },
-        { $set: { proactiveStage: stageToSend + 1, lastMessage: text, lastMessageAt: new Date() } }
-      )
+      await Room.updateOne({ _id: room._id }, { $set: { lastMessage: text, lastMessageAt: new Date() } })
 
       sent++
     } catch (err) {
