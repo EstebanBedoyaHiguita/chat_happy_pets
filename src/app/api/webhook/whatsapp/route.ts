@@ -13,8 +13,10 @@ import { fetchAdNames } from '@/lib/meta-ads'
 import { speciesIn } from '@/lib/product-display'
 import { normalize } from '@/lib/order-pricing'
 import { handleSupplierMessage, isSupplierWaId } from '@/lib/supplier-dispatch'
+import { esElUltimoDeLaRafaga, hayPendientes, soltarTurno, tomarRafaga, tomarTurno } from '@/lib/turn-lock'
 import type { RoomDoc, ChannelType } from '@/lib/models/Room'
-import type { Document } from 'mongoose'
+import type { Document, Types } from 'mongoose'
+import type { ITransferRule } from '@/types'
 
 // El turno que crea un pedido encadena varias llamadas a OpenAI y al backend
 // (catalogo, ciudades, costo de envio). Con el default de Vercel la funcion se
@@ -120,6 +122,7 @@ async function processMessage(parsed: {
   referral?: AdReferral
   replyToId?: string
 }, baseUrl = '') {
+  const inicio = Date.now()
   // Mark as read (WhatsApp only — Messenger/Instagram mark read via different API)
   if (parsed.channel === 'whatsapp') markWhatsAppMessageRead(parsed.messageId)
 
@@ -212,19 +215,16 @@ async function processMessage(parsed: {
   const replyTo = channelRecipientId(room)
   const roomWaId = room.waId
 
-  // mediaUrl = URL stored in DB for display in chat (proxy endpoint)
-  // visionUrl = base64 data URL sent to GPT-4o Vision (OpenAI can't access private endpoints)
+  // mediaUrl = URL stored in DB for display in chat (proxy endpoint). La URL para Vision
+  // se arma en responderTurno con la última imagen de la ráfaga.
   let mediaUrl: string | undefined
-  let visionUrl: string | undefined
   let audioTranscription: string | undefined
 
   if (parsed.mediaType === 'image') {
     if (parsed.mediaId) {
       mediaUrl = `/api/media/${parsed.mediaId}`
-      visionUrl = baseUrl ? `${baseUrl}/api/media/${parsed.mediaId}` : undefined
     } else if (parsed.mediaUrl) {
       mediaUrl = parsed.mediaUrl
-      visionUrl = parsed.mediaUrl
     }
   }
 
@@ -248,7 +248,7 @@ async function processMessage(parsed: {
         ? '[Video]'
         : parsed.text
 
-  await Message.create({
+  const inbound = await Message.create({
     roomId: room._id,
     direction: 'inbound',
     sender: 'user',
@@ -268,6 +268,9 @@ async function processMessage(parsed: {
     room.closeReasonName = undefined
     room.closedBy = undefined
     room.windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    // Lo que el cliente escribió con la sala cerrada no es parte de esta conversación:
+    // la ráfaga empieza en este mensaje.
+    room.botAnsweredUntil = new Date(inbound.timestamp.getTime() - 1)
     await room.save()
   }
 
@@ -285,6 +288,7 @@ async function processMessage(parsed: {
       timestamp: new Date(),
     })
     room.lastMessage = UNSUPPORTED_MEDIA_MSG
+    room.botAnsweredUntil = inbound.timestamp
     room.lastMessageAt = new Date()
     await room.save()
     return
@@ -302,6 +306,7 @@ async function processMessage(parsed: {
       timestamp: new Date(),
     })
     room.lastMessage = UNSUPPORTED_MEDIA_MSG
+    room.botAnsweredUntil = inbound.timestamp
     room.lastMessageAt = new Date()
     await room.save()
     return
@@ -318,12 +323,61 @@ async function processMessage(parsed: {
     return
   }
 
-  const history = await Message.find({ roomId: room._id })
+  // Una respuesta por ráfaga y un solo turno a la vez por sala (ver turn-lock.ts). Si el
+  // cliente sigue escribiendo, este mensaje lo responde el turno de su último mensaje.
+  if (!(await esElUltimoDeLaRafaga(room._id, inbound._id))) return
+  if (!(await tomarTurno(room._id))) {
+    console.error(`[WEBHOOK] ${roomWaId}: la sala siguió ocupada; el mensaje queda para el siguiente turno`)
+    return
+  }
+  try {
+    await responderTurno(room._id, inbound._id, parsed, replyTo, config, baseUrl)
+    // Lo que el cliente escribió mientras este turno respondía, si su propio mensaje se
+    // cansó de esperar el turno: se responde ya, si a la función le queda tiempo.
+    if (Date.now() - inicio < 25_000 && (await hayPendientes(room._id))) {
+      await responderTurno(room._id, inbound._id, parsed, replyTo, config, baseUrl)
+    }
+  } finally {
+    await soltarTurno(room._id)
+  }
+}
+
+type ParsedIncoming = Parameters<typeof processMessage>[0]
+
+async function responderTurno(
+  roomId: Types.ObjectId,
+  inboundId: Types.ObjectId,
+  parsed: ParsedIncoming,
+  replyTo: string,
+  config: { systemPrompt: string; transferRules: ITransferRule[]; aiModel: string; temperature: number },
+  baseUrl: string
+) {
+  // La sala se relee: mientras este mensaje esperaba, otro turno pudo transferirla o cerrarla.
+  const room = await Room.findById(roomId)
+  if (!room || room.status !== 'bot') return
+
+  const rafaga = await tomarRafaga(room._id, room.botAnsweredUntil)
+  if (rafaga.length === 0) return
+
+  // El historial termina antes de la ráfaga: lo que el cliente acaba de escribir va una
+  // sola vez, como su mensaje. Antes iba dos veces (en el historial y como mensaje).
+  const history = await Message.find({ roomId: room._id, timestamp: { $lt: rafaga[0].timestamp } })
     .sort({ timestamp: -1 })
     .limit(20)
     .then((msgs) => msgs.reverse())
 
-  // Saludo, snacks y datos del pedido los calcula runAgent (turn-guidance.ts).
+  const userMessage = rafaga
+    .map((m) => (m.mediaType === 'image' && m.content === '[Imagen]' ? 'El cliente envió una imagen.' : m.content))
+    .filter(Boolean)
+    .join('\n')
+  // La última imagen de la ráfaga va a Vision (un comprobante seguido de "ya pagué").
+  const imagen = [...rafaga].reverse().find((m) => m.mediaType === 'image' && m.mediaUrl)
+  const visionUrl = !imagen?.mediaUrl
+    ? undefined
+    : imagen.mediaUrl.startsWith('/')
+      ? (baseUrl ? `${baseUrl}${imagen.mediaUrl}` : undefined)
+      : imagen.mediaUrl
+
   const roomData: RoomKnownData = {
     name: room.name,
     phone: room.phone || undefined,
@@ -344,13 +398,15 @@ async function processMessage(parsed: {
   }
 
   // El cliente respondió citando un mensaje (casi siempre la foto de un producto, con
-  // "ese"). Meta solo manda el id: el contenido se busca en la sala.
-  const quoted = parsed.replyToId
+  // "ese"). Meta solo manda el id: el contenido se busca en la sala. Solo si el mensaje
+  // que trajo la cita está en esta ráfaga (no en una que este turno responde de paso).
+  const citaEnRafaga = parsed.replyToId && rafaga.some((m) => String(m._id) === String(inboundId))
+  const quoted = citaEnRafaga
     ? await Message.findOne({ roomId: room._id, waMessageId: parsed.replyToId }).lean()
     : null
 
   const agentResponse = await runAgent(
-    audioTranscription || parsed.text || (parsed.mediaType === 'image' ? 'El cliente envió una imagen.' : ''),
+    userMessage,
     history.map((m) => ({
       _id: m._id.toString(),
       roomId: m.roomId.toString(),
@@ -367,7 +423,7 @@ async function processMessage(parsed: {
     config.aiModel,
     config.temperature,
     room.contextSummary ?? '',
-    roomWaId,
+    room.waId,
     roomData,
     visionUrl,
     quoted?.content

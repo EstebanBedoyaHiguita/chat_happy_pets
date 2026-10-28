@@ -48,6 +48,10 @@ export interface RoomDoc extends Document {
   sourceUrl?: string
   proactiveStage?: number
   lastInboundAt?: Date
+  /** Turno del bot en curso hasta esta hora (ver turn-lock.ts). Vence solo si la función se cae. */
+  botLockUntil?: Date | null
+  /** Hasta qué mensaje del cliente ya respondió el bot: lo posterior es la ráfaga pendiente. */
+  botAnsweredUntil?: Date | null
 }
 
 const RoomSchema = new Schema<RoomDoc>(
@@ -99,6 +103,8 @@ const RoomSchema = new Schema<RoomDoc>(
     sourceUrl: { type: String },
     proactiveStage: { type: Number, default: 0 },
     lastInboundAt: { type: Date },
+    botLockUntil: { type: Date, default: null },
+    botAnsweredUntil: { type: Date, default: null },
   },
   { timestamps: true }
 )

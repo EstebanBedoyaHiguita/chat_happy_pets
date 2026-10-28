@@ -10,6 +10,9 @@ import { sendChannelMessage, sendChannelImage, channelRecipientId } from '@/lib/
 import { buildOutgoingTexts } from '@/lib/outgoing-text'
 import { DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import type { AgentProduct } from '@/lib/openai-agent'
+import { soltarTurno, tomarTurno } from '@/lib/turn-lock'
+import type { RoomDoc } from '@/lib/models/Room'
+import type { MessageDoc } from '@/lib/models/Message'
 
 // El turno que crea un pedido encadena varias llamadas a OpenAI y al backend
 // (catalogo, ciudades, costo de envio). Con el default de Vercel la funcion se
@@ -68,7 +71,20 @@ async function resumeBot(roomId: string) {
 
   const lastInbound = lastMessage
 
-  const history = await Message.find({ roomId: room._id })
+  // Mismo turno por sala que el webhook (turn-lock.ts): si el cliente justo está
+  // escribiendo y el webhook ya está respondiendo, no se le contesta dos veces.
+  if (!(await tomarTurno(room._id, 0))) return
+  try {
+    await Room.updateOne({ _id: room._id }, { $set: { botAnsweredUntil: lastInbound.timestamp } })
+    await responder(room, lastInbound)
+  } finally {
+    await soltarTurno(room._id)
+  }
+}
+
+async function responder(room: RoomDoc, lastInbound: MessageDoc) {
+  // El historial termina antes del mensaje que se responde, que va aparte: antes iba dos veces.
+  const history = await Message.find({ roomId: room._id, timestamp: { $lt: lastInbound.timestamp } })
     .sort({ timestamp: -1 })
     .limit(20)
     .then((msgs) => msgs.reverse())
