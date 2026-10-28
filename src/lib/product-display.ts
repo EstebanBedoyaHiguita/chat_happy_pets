@@ -1,5 +1,6 @@
 import { normalize } from './order-pricing'
 import { getProducts } from './happy-pets-api'
+import { traeCantidad } from './order-flow'
 
 /**
  * Decide QUÉ productos se le muestran al cliente y CUÁNDO.
@@ -212,6 +213,8 @@ export interface DisplayDecision {
   ambiguous: boolean
   /** True cuando el producto sale de la foto que el cliente citó: ya la tiene en pantalla. */
   quoted?: boolean
+  /** True cuando el mensaje ya dice cuántos quiere ("quiero 3 de res"). */
+  conCantidades?: boolean
 }
 
 /**
@@ -241,6 +244,12 @@ export function decideDisplay(
   barf: CatalogProduct[],
   catalog: CatalogProduct[] = []
 ): DisplayDecision {
+  const decision = decidir(message, barf, catalog)
+  // "quiero 3 de res": ya eligió y dijo cuántos. No se le pregunta "¿otro sabor?".
+  return decision.mode === 'seleccion' && traeCantidad(message) ? { ...decision, conCantidades: true } : decision
+}
+
+function decidir(message: string, barf: CatalogProduct[], catalog: CatalogProduct[]): DisplayDecision {
   const said = new Set(tokens(message))
 
   // Si el cliente nombró algo que NO es BARF y lo nombró con más precisión ("albóndigas
@@ -417,7 +426,10 @@ export function buildDisplayInstruction(
       : decision.ambiguous
         ? 'El cliente nombró un sabor de forma imprecisa y hay más de una opción posible. ' +
           'Muéstrale ESTAS y pregúntale cuál quiere. No elijas tú por él:'
-        : 'El cliente nombró estos sabores. Muéstrale SOLO estos y pregúntale si quiere agregar ' +
+        : decision.conCantidades
+          ? 'El cliente nombró estos sabores y YA dijo cuántos quiere. NO le preguntes si quiere otro ' +
+            'sabor ni la cantidad otra vez: confírmale lo que pidió con el resumen del pedido ("¿Es correcto?"):'
+          : 'El cliente nombró estos sabores. Muéstrale SOLO estos y pregúntale si quiere agregar ' +
           'otro sabor. ⛔ NO le pidas cantidades todavía: las cantidades se preguntan UNA sola vez, ' +
           'cuando ya tenga cerrada la lista de sabores:'
     return (

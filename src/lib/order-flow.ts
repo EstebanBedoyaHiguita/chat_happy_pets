@@ -21,6 +21,8 @@ const palabras = (t: string) => normalizar(t).split(' ').filter(Boolean)
 const CIERRE = new Set([
   'no', 'nop', 'nel', 'ninguno', 'ninguna', 'nada', 'mas', 'listo', 'ya', 'eso',
   'solo', 'solamente', 'asi', 'esta', 'bien', 'gracias', 'ahi', 'ok', 'vale', 'esos', 'esas',
+  // "solo ese", "esa nada más": faltaban y el cierre no se detectaba (2026-10-26).
+  'ese', 'esa', 'este', 'estos', 'estas',
 ])
 
 /** Números escritos. Se omiten "uno"/"una" a propósito: aparecen en habla normal. */
@@ -51,16 +53,44 @@ export function cierraListaDeSabores(userMessage: string): boolean {
  * recordatorio, no se rompe nada.
  */
 export function faltanCantidades(historial: { direction: string; content: string }[]): boolean {
-  const mostroProducto = historial.some(
+  const primeraFoto = historial.findIndex(
     (m) => m.direction === 'outbound' && m.content.includes('http')
   )
-  if (!mostroProducto) return false
-  const dijoCantidad = historial.some(
-    (m) =>
-      m.direction === 'inbound' &&
-      (/\d/.test(m.content) || palabras(m.content).some((w) => NUMEROS.has(w)))
-  )
+  if (primeraFoto === -1) return false
+  // Solo cuenta lo que dijo después de ver productos: antes habla de su mascota.
+  const dijoCantidad = historial
+    .slice(primeraFoto)
+    .some((m) => m.direction === 'inbound' && traeCantidad(m.content))
   return !dijoCantidad
+}
+
+/** Lo que va después de un número cuando NO es una cantidad de paquetes. */
+const UNIDADES = new Set([
+  'kg', 'kgs', 'k', 'kilo', 'kilos', 'gr', 'grs', 'g', 'gramo', 'gramos', 'lb', 'libra', 'libras',
+  'ano', 'anos', 'mes', 'meses', 'semana', 'semanas', 'dia', 'dias', 'cm', 'am', 'pm', 'h', 'hora', 'horas',
+])
+
+/** Una dirección trae números que no son cantidades ("Calle 10 # 5-20, apto 301"). */
+const DIRECCION = /\b(calle|cll|cl|carrera|cra|kr|cr|avenida|av|diagonal|dg|transversal|tv|circular|apto|apartamento|barrio|torre|interior|int|manzana|mz)\b/
+
+/**
+ * ¿El mensaje dice cuántos paquetes quiere? "quiero 3 de res", "cinco de pollo", "un
+ * paquete". No cuentan un peso ("pesa 15 kilos", que sí contaba hasta 2026-10-28), una
+ * edad, una hora, una dirección ni un teléfono.
+ */
+export function traeCantidad(texto: string): boolean {
+  const limpio = normalizar(texto)
+  if (texto.includes('#') || DIRECCION.test(limpio)) return false
+  const ws = limpio.split(' ').filter(Boolean)
+  return ws.some((w, i) => {
+    const sig = ws[i + 1] ?? ''
+    if (/^\d+$/.test(w)) return w.length <= 3 && !UNIDADES.has(sig)
+    if (/^\d+[a-z]+$/.test(w)) return !UNIDADES.has(w.replace(/^\d+/, ''))
+    if (NUMEROS.has(w)) return !UNIDADES.has(sig)
+    // "uno"/"una" no cuentan solos (habla normal), pero "un paquete" sí.
+    if (['un', 'una', 'uno'].includes(w)) return /^(paquete|paquetes|bolsa|bolsas)$/.test(sig)
+    return false
+  })
 }
 
 /**
