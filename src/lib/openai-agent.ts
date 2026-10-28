@@ -10,10 +10,10 @@ import {
 } from './happy-pets-api'
 import { checkIntentRules } from './transfer-rules'
 import { diffItems, priceItems, sumSubtotal, toProductList, type PricedItem, type RequestedItem } from './order-pricing'
-import { barfFor, buildDisplayInstruction, decideDisplay, getCatalog, resolveSpecies, stripCardEcho } from './product-display'
+import { barfFor, buildDisplayInstruction, choosePhotos, decideDisplay, getCatalog, resolveSpecies, stripCardEcho, type CatalogProduct, type DisplayDecision, type PetType } from './product-display'
 import { cierraListaDeSabores, direccionEsUtil, faltanCantidades } from './order-flow'
 import { getDeliveryDate, withDeliveryMessage } from './delivery'
-import { extractTransferSignal, toWhatsAppText } from './outgoing-text'
+import { extractTransferSignal, insertPhotoUrls, toWhatsAppText } from './outgoing-text'
 import { buildSheetPayload, sendToSheet } from './sheet-payload'
 import type { IMessage, ITransferRule } from '@/types'
 
@@ -998,6 +998,8 @@ Si NO hay que transferir, no incluyas ese JSON.`
   // llame get_products — que es justo lo que pasaba cuando se inventaba precios.
   const collectedImageUrls: string[] = []
   const collectedProducts: AgentProduct[] = []
+  // Lo que se decidió mostrar este turno: con eso se eligen las fotos al final.
+  let display: { decision: DisplayDecision; barf: CatalogProduct[]; species: PetType[] } | null = null
   try {
     const catalog = await getCatalog()
     // La especie se decide en cada turno (mensaje → lo último que dijo → mascotas de la
@@ -1013,6 +1015,7 @@ Si NO hay que transferir, no incluyas ese JSON.`
       if (p.imageUrl) collectedImageUrls.push(p.imageUrl)
     }
     const decision = decideDisplay(userMessage, barf, catalog)
+    display = { decision, barf, species }
     const instruction = buildDisplayInstruction(decision, barf, species)
     if (instruction) messages.push({ role: 'system', content: instruction })
 
@@ -1239,22 +1242,19 @@ Si NO hay que transferir, no incluyas ese JSON.`
   fullText = toWhatsAppText(signal.text)
   if (orderCreated) fullText = withDeliveryMessage(fullText)
 
-  // Only send product cards for products whose image URL the agent explicitly included
-  // in its response. This lets the agent list products as plain text (no image URLs)
-  // for the initial BARF presentation, and only show image cards when the client
-  // selects a specific product and the agent includes that product's image URL.
-  // Dedupe: un mismo producto puede venir del catálogo sembrado y de get_products.
-  // Se ordenan por dónde aparece su URL en el texto: así las fotos salen en el orden en
-  // que el agente las presentó (el de la vitrina) y no en el del catálogo.
-  const seenImages = new Set<string>()
-  const mentionedProducts = collectedProducts
-    .filter(p => {
-      if (!p.imageUrl || !fullText.includes(p.imageUrl)) return false
-      if (seenImages.has(p.imageUrl)) return false
-      seenImages.add(p.imageUrl)
-      return true
-    })
-    .sort((a, b) => fullText.indexOf(a.imageUrl) - fullText.indexOf(b.imageUrl))
+  // Las fotos las decide el código con lo que se le mostró al modelo este turno: las que
+  // él escribió (menos las de otra especie) más las del sabor que nombró el cliente, sin
+  // repetir las que ya tiene en pantalla. Ver choosePhotos. Con un pedido recién creado o
+  // una transferencia no se agrega ninguna: ese mensaje no es para mostrar productos.
+  const mentionedProducts = choosePhotos({
+    text: fullText,
+    collected: collectedProducts,
+    decision: orderCreated || signal.transfer || forceTransfer ? null : (display?.decision ?? null),
+    barf: display?.barf ?? [],
+    species: display?.species ?? [],
+    recentOutbound: conversationHistory.filter((m) => m.direction === 'outbound').map((m) => m.content),
+  })
+  fullText = insertPhotoUrls(fullText, mentionedProducts.map((p) => p.imageUrl))
 
   let transfer = signal.transfer
   let transferReason = signal.reason

@@ -137,6 +137,45 @@ export function extractImageUrls(text: string): { cleanText: string; imageUrls: 
 }
 
 /**
+ * Pone en el texto las URLs de las fotos que el código agregó (ver `choosePhotos`), para
+ * que el corte por URL las ubique donde corresponde:
+ *  - después de la última foto que el modelo sí escribió;
+ *  - si no escribió ninguna, antes de la pregunta final ("¿Quieres agregar otro
+ *    sabor?"), que debe llegar después de las fotos;
+ *  - si no hay pregunta, al final.
+ */
+export function insertPhotoUrls(text: string, urls: string[]): string {
+  const faltan = urls.filter((u) => !text.includes(u))
+  if (faltan.length === 0) return text
+  const lines = text.split('\n')
+
+  let ultimaFoto = -1
+  lines.forEach((l, i) => {
+    if (urls.some((u) => l.includes(u))) ultimaFoto = i
+  })
+  if (ultimaFoto >= 0) {
+    lines.splice(ultimaFoto + 1, 0, ...faltan)
+    return lines.join('\n')
+  }
+
+  let ultima = lines.length - 1
+  while (ultima > 0 && !lines[ultima].trim()) ultima--
+  const final = lines[ultima] ?? ''
+  if (final.includes('?')) {
+    const pregunta = final.lastIndexOf('¿')
+    if (pregunta > 0) {
+      lines.splice(ultima, 1, final.slice(0, pregunta).trimEnd(), ...faltan, final.slice(pregunta))
+      return lines.join('\n')
+    }
+    if (ultima > 0) {
+      lines.splice(ultima, 0, ...faltan)
+      return lines.join('\n')
+    }
+  }
+  return [text, ...faltan].join('\n')
+}
+
+/**
  * Borra lo que queda huérfano cuando una URL sale del texto para volverse foto: la
  * numeración o la viñeta que la precedía ("2. ", "- "), un emoji solo en su línea, un
  * "Imagen:" sin nada al lado.

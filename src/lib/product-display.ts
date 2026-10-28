@@ -47,9 +47,9 @@ const tokens = (s: string) =>
 /** Tokens que identifican el sabor: "Dieta Barf Gato De Pollo" → ["pollo"]. */
 export const flavorTokens = (name: string) => tokens(name).filter((w) => !NON_FLAVOR.has(w))
 
-const isBarf = (p: CatalogProduct) => normalize(p.name).startsWith('dieta barf')
+const isBarf = (p: { name: string }) => normalize(p.name).startsWith('dieta barf')
 
-const petTypeOf = (p: CatalogProduct): PetType =>
+const petTypeOf = (p: { name: string }): PetType =>
   tokens(p.name).includes('gato') ? 'gato' : 'perro'
 
 // El catálogo cambia poco y se consulta en cada turno: se cachea en memoria del
@@ -397,6 +397,66 @@ export function buildDisplayInstruction(
     `\n\n${CARD_RULE}` +
     restoTexto
   )
+}
+
+/** Máximo de fotos por respuesta. */
+export const MAX_PHOTOS = 4
+
+/**
+ * Qué fotos salen en esta respuesta. Hasta 2026-10-28 salían solo las que el modelo
+ * escribía como URL, y eso fallaba para los dos lados: 5 de 18 pedidos se cerraron sin
+ * que el cliente viera una sola foto (el modelo nombraba el sabor sin URL), y otras
+ * veces la URL era de la especie equivocada (foto de gato a quien tiene perro).
+ *
+ * Ahora:
+ *  1. Lo que el modelo escribió como URL sigue saliendo (nunca se le apaga una foto),
+ *     salvo una dieta BARF de una especie que no está en juego este turno.
+ *  2. Si el cliente nombró sabores (selección), salen sus fotos aunque el modelo no
+ *     haya escrito la URL.
+ *  3. Si está conociendo el catálogo y el modelo está mostrando productos (escribió una
+ *     URL o el nombre de uno de la vitrina), se completa la vitrina.
+ * Lo que el código agrega nunca repite una foto que ya salió en los mensajes recientes:
+ * el cliente la tiene en pantalla.
+ */
+export function choosePhotos<T extends { name: string; imageUrl: string }>(opts: {
+  text: string
+  collected: T[]
+  decision: DisplayDecision | null
+  barf: CatalogProduct[]
+  species: PetType[]
+  recentOutbound: string[]
+}): T[] {
+  const { text, collected, decision, barf, species, recentOutbound } = opts
+  const byUrl = new Map<string, T>()
+  for (const p of collected) if (p.imageUrl && !byUrl.has(p.imageUrl)) byUrl.set(p.imageUrl, p)
+
+  const especieValida = (p: { name: string }) =>
+    species.length === 0 || !isBarf(p) || species.includes(petTypeOf(p))
+
+  const delModelo = [...byUrl.values()]
+    .filter((p) => text.includes(p.imageUrl) && especieValida(p))
+    .sort((a, b) => text.indexOf(a.imageUrl) - text.indexOf(b.imageUrl))
+
+  let sugeridas: CatalogProduct[] = []
+  if (decision?.mode === 'seleccion') {
+    sugeridas = decision.selected.slice(0, MAX_PHOTOS)
+  } else if (decision?.mode === 'descubrimiento' && species.length > 0) {
+    const vitrina = showcaseFor(barf, species)
+    const textoNorm = normalize(text)
+    const mostrando =
+      delModelo.some((p) => barf.some((b) => b.imageUrl === p.imageUrl)) ||
+      vitrina.some((p) => textoNorm.includes(normalize(p.name)))
+    if (mostrando) sugeridas = vitrina
+  }
+
+  const yaSalio = (url: string) => recentOutbound.some((m) => m.includes(url))
+  const elegidas = [...delModelo]
+  for (const s of sugeridas) {
+    const p = byUrl.get(s.imageUrl)
+    if (!p || elegidas.includes(p) || yaSalio(p.imageUrl)) continue
+    elegidas.push(p)
+  }
+  return elegidas.slice(0, MAX_PHOTOS)
 }
 
 /**
