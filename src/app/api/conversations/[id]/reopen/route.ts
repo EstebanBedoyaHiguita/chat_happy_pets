@@ -37,7 +37,7 @@ export async function POST(
 
   // Save outbound message
   const content = bodyText || `[Plantilla: ${templateName}]`
-  await Message.create({
+  const plantilla = await Message.create({
     roomId: room._id,
     direction: 'outbound',
     sender: 'bot',
@@ -46,6 +46,12 @@ export async function POST(
     timestamp: new Date(),
   })
 
+  // Visita nueva, igual que cuando el cliente reabre la sala (webhook): empieza en la
+  // plantilla, que el bot sí ve porque es lo que el cliente va a responder. Nada de lo
+  // anterior queda pendiente de respuesta.
+  room.visitStartedAt = plantilla.timestamp
+  room.contextSummary = ''
+  room.botAnsweredUntil = plantilla.timestamp
   room.status = 'bot'
   room.windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
   room.lastMessage = content
