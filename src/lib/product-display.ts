@@ -69,7 +69,11 @@ const petTypeOf = (p: { name: string }): PetType =>
 // en Render y un arranque en frío no puede dejar al cliente esperando la respuesta.
 let cache: { at: number; products: CatalogProduct[] } | null = null
 let refreshing: Promise<CatalogProduct[]> | null = null
+// Una sola consulta en vuelo: el precalentamiento del webhook y el turno comparten la misma.
+let enVuelo: Promise<CatalogProduct[]> | null = null
 const CACHE_MS = 300_000
+/** Cuánto se le espera al backend antes de leer el catálogo de Mongo. */
+const API_TIMEOUT_MS = 6_000
 
 export async function getCatalog(): Promise<CatalogProduct[]> {
   const fresh = cache && Date.now() - cache.at < CACHE_MS
@@ -84,24 +88,67 @@ export async function getCatalog(): Promise<CatalogProduct[]> {
       })
   }
   if (cache) return cache.products
-  return fetchCatalog()
+  if (!enVuelo) {
+    enVuelo = fetchCatalog().finally(() => {
+      enVuelo = null
+    })
+  }
+  return enVuelo
+}
+
+/**
+ * Se llama apenas llega un mensaje, sin esperarlo: mientras el webhook espera la ráfaga
+ * (4 s), el catálogo ya viene en camino y Render se despierta.
+ */
+export function precalentarCatalogo(): void {
+  getCatalog().catch(() => {})
 }
 
 async function fetchCatalog(): Promise<CatalogProduct[]> {
-  const base = process.env.HAPPY_PETS_API_URL ?? ''
-  const raw = await getProducts()
-  const list: Record<string, unknown>[] = Array.isArray(raw)
+  let list: Record<string, unknown>[]
+  try {
+    list = toList(await getProducts(undefined, API_TIMEOUT_MS))
+    if (list.length === 0) throw new Error('el backend devolvió un catálogo vacío')
+  } catch (err) {
+    // El backend (Render) no respondió a tiempo. Los productos viven en la misma base
+    // `happypets` que usa el chat: se leen de ahí, solo lectura, como respaldo.
+    console.error('[CATALOGO] backend no disponible, se lee de Mongo:', err instanceof Error ? err.message : err)
+    list = await catalogFromDb()
+  }
+  return toCatalog(list)
+}
+
+function toList(raw: unknown): Record<string, unknown>[] {
+  return Array.isArray(raw)
     ? raw
     : Array.isArray((raw as { data?: unknown })?.data)
       ? ((raw as { data: unknown[] }).data as Record<string, unknown>[])
       : Array.isArray((raw as { items?: unknown })?.items)
         ? ((raw as { items: unknown[] }).items as Record<string, unknown>[])
         : []
+}
 
+async function catalogFromDb(): Promise<Record<string, unknown>[]> {
+  const { connectDB } = await import('./mongodb')
+  await connectDB()
+  const mongoose = (await import('mongoose')).default
+  const db = mongoose.connection.db
+  if (!db) return []
+  // Mismo filtro que GET /api/products sin parámetros (products.service.findAll): todos.
+  return db
+    .collection('products')
+    .find({})
+    .project({ name: 1, price: 1, description: 1, images: 1 })
+    .toArray()
+}
+
+function toCatalog(list: Record<string, unknown>[]): CatalogProduct[] {
+  const base = process.env.HAPPY_PETS_API_URL ?? ''
   const products = list.map((p) => {
     const img = Array.isArray(p.images) ? (p.images as string[])[0] : null
     return {
-      _id: (p._id as string) ?? '',
+      // String(): leído de Mongo el _id es un ObjectId, y se compara como texto.
+      _id: p._id != null ? String(p._id) : '',
       name: (p.name as string) ?? '',
       price: typeof p.price === 'number' ? p.price : Number(p.price) || 0,
       description: (p.description as string) ?? '',

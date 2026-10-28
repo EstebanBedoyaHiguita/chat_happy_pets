@@ -10,7 +10,7 @@ import { buildOutgoingTexts } from '@/lib/outgoing-text'
 import { runAgent, summarizeHistory, transcribeAudio, RoomKnownData, AgentProduct } from '@/lib/openai-agent'
 import { checkKeywordRules, DEFAULT_TRANSFER_RULES } from '@/lib/transfer-rules'
 import { fetchAdNames } from '@/lib/meta-ads'
-import { speciesIn } from '@/lib/product-display'
+import { precalentarCatalogo, speciesIn } from '@/lib/product-display'
 import { normalize } from '@/lib/order-pricing'
 import { handleSupplierMessage, isSupplierWaId } from '@/lib/supplier-dispatch'
 import { esElUltimoDeLaRafaga, hayPendientes, soltarTurno, tomarRafaga, tomarTurno } from '@/lib/turn-lock'
@@ -139,6 +139,10 @@ async function processMessage(parsed: {
     await handleSupplierMessage(parsed)
     return
   }
+
+  // El catálogo se pide ya, sin esperarlo: llega mientras corre la espera de ráfaga, y
+  // de paso despierta al backend de Render para las herramientas del turno.
+  precalentarCatalogo()
 
   // Get or create room — key is channel:senderId to allow same person on multiple channels
   // En WhatsApp la clave es el teléfono cuando viene; si el usuario ocultó su número con

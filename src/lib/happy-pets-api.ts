@@ -1,10 +1,18 @@
 const BASE_URL = process.env.HAPPY_PETS_API_URL
 
-async function fetchHP(path: string, options?: RequestInit) {
+/**
+ * El backend está en Render y se duerme: el primer request tardaba hasta ~37 s y el
+ * cliente esperaba todo ese tiempo (auditoría 2026-10-26). Con un tiempo máximo, quien
+ * llama decide qué hacer: el catálogo cae a Mongo (product-display.ts).
+ */
+const DEFAULT_TIMEOUT_MS = 15_000
+
+async function fetchHP(path: string, options?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
     next: { revalidate: 0 },
+    signal: AbortSignal.timeout(timeoutMs),
   })
   if (!res.ok) {
     const text = await res.text()
@@ -13,9 +21,9 @@ async function fetchHP(path: string, options?: RequestInit) {
   return res.json()
 }
 
-export async function getProducts(category?: string) {
+export async function getProducts(category?: string, timeoutMs?: number) {
   const qs = category ? `?category=${category}` : ''
-  return fetchHP(`/api/products${qs}`)
+  return fetchHP(`/api/products${qs}`, undefined, timeoutMs)
 }
 
 export async function getFeaturedProducts() {
